@@ -1,65 +1,55 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
-import '../services/api_service.dart';
-import '../services/notification_service.dart';
+import 'package:http/http.dart' as http;
 
-class ChatPage extends StatefulWidget {
-  const ChatPage({Key? key}) : super(key: key);
+class ChatExpenseScreen extends StatefulWidget {
+  const ChatExpenseScreen({super.key});
 
   @override
-  State<ChatPage> createState() => _ChatPageState();
+  State<ChatExpenseScreen> createState() => _ChatExpenseScreenState();
 }
 
-class _ChatPageState extends State<ChatPage> {
-  final _controller = TextEditingController();
-  final _scrollCtrl = ScrollController();
-  final _api = ApiService();
+class _ChatExpenseScreenState extends State<ChatExpenseScreen> {
+  final TextEditingController _controller = TextEditingController();
+  final List<Map<String, String>> _messages = [];
+  final String apiUrl = "http://localhost:8000/chat-expense";
+  // Android emulator localhost
 
-  final List<_ChatMsg> _messages = [
-    _ChatMsg(
-        role: 'bot',
-        text:
-            'Hi! Tell me your expense in plain English.\nExample: “I ate a burger of 500rs at KFC yesterday”'),
-  ];
+  Future<void> _sendMessage() async {
+    String message = _controller.text.trim();
+    if (message.isEmpty) return;
 
-  Future<void> _send() async {
-    final text = _controller.text.trim();
-    if (text.isEmpty) return;
     setState(() {
-      _messages.add(_ChatMsg(role: 'user', text: text));
-      _controller.clear();
+      _messages.add({"sender": "user", "text": message});
     });
+    _controller.clear();
 
     try {
-      final created = await _api.addExpenseFromText(text);
-
-      setState(() {
-        _messages.add(_ChatMsg(
-          role: 'bot',
-          text:
-              'Got it! Added:\n• ${created.title}\n• Rs. ${created.amount.toStringAsFixed(0)}\n• ${created.category}\n• ${created.date}',
-        ));
-      });
-
-      await NotificationService.showNotification(
-        title: "Expense Added (Chat)",
-        body: "Rs. ${created.amount.toStringAsFixed(0)} • ${created.title}",
+      final response = await http.post(
+        Uri.parse(apiUrl),
+        headers: {"Content-Type": "application/json"},
+        body: jsonEncode({"message": message}),
       );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final parsed = data["data"];
+
+        String reply =
+            "Added ${parsed['title']} of ${parsed['amount']}rs under ${parsed['category']} on ${parsed['date']}";
+
+        setState(() {
+          _messages.add({"sender": "bot", "text": reply});
+        });
+      } else {
+        setState(() {
+          _messages.add({"sender": "bot", "text": "Failed to add expense"});
+        });
+      }
     } catch (e) {
       setState(() {
-        _messages.add(_ChatMsg(
-            role: 'bot',
-            text:
-                'Sorry, I couldn’t parse that. Please include the amount, e.g., “rs 500”.'));
+        _messages.add({"sender": "bot", "text": "Error: $e"});
       });
-    }
-
-    await Future.delayed(const Duration(milliseconds: 100));
-    if (_scrollCtrl.hasClients) {
-      _scrollCtrl.animateTo(
-        _scrollCtrl.position.maxScrollExtent,
-        duration: const Duration(milliseconds: 250),
-        curve: Curves.easeOut,
-      );
     }
   }
 
@@ -67,38 +57,31 @@ class _ChatPageState extends State<ChatPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text("Add via Chat"),
-        centerTitle: true,
-        backgroundColor: Colors.blue,
-        foregroundColor: Colors.white,
+        title: const Text("Chat with Expense Bot"),
       ),
-      backgroundColor: Colors.white,
       body: Column(
         children: [
           Expanded(
             child: ListView.builder(
-              controller: _scrollCtrl,
-              padding: const EdgeInsets.all(12),
+              padding: const EdgeInsets.all(10),
               itemCount: _messages.length,
-              itemBuilder: (_, i) {
-                final m = _messages[i];
-                final isUser = m.role == 'user';
+              itemBuilder: (context, index) {
+                final msg = _messages[index];
+                bool isUser = msg["sender"] == "user";
                 return Align(
                   alignment:
                       isUser ? Alignment.centerRight : Alignment.centerLeft,
                   child: Container(
-                    margin: const EdgeInsets.symmetric(vertical: 6),
+                    margin: const EdgeInsets.symmetric(vertical: 4),
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: isUser ? Colors.blue : Colors.blue.shade50,
-                      borderRadius: BorderRadius.circular(14),
+                      color: isUser ? Colors.blue : Colors.grey[300],
+                      borderRadius: BorderRadius.circular(12),
                     ),
                     child: Text(
-                      m.text,
+                      msg["text"]!,
                       style: TextStyle(
-                        color: isUser ? Colors.white : Colors.black87,
-                        fontSize: 14,
-                        height: 1.35,
+                        color: isUser ? Colors.white : Colors.black,
                       ),
                     ),
                   ),
@@ -108,42 +91,29 @@ class _ChatPageState extends State<ChatPage> {
           ),
           SafeArea(
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(12, 6, 12, 12),
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
               child: Row(
                 children: [
                   Expanded(
                     child: TextField(
                       controller: _controller,
-                      decoration: InputDecoration(
-                        hintText: "e.g., I ate a burger of 500rs at KFC",
-                        filled: true,
-                        fillColor: Colors.blue.shade50,
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12),
-                          borderSide: BorderSide.none,
-                        ),
+                      decoration: const InputDecoration(
+                        hintText: "Type an expense...",
+                        border: OutlineInputBorder(),
                       ),
-                      onSubmitted: (_) => _send(),
+                      onSubmitted: (_) => _sendMessage(),
                     ),
                   ),
-                  const SizedBox(width: 8),
                   IconButton(
-                    onPressed: _send,
                     icon: const Icon(Icons.send),
-                    color: Colors.blue,
-                  )
+                    onPressed: _sendMessage,
+                  ),
                 ],
               ),
             ),
-          )
+          ),
         ],
       ),
     );
   }
-}
-
-class _ChatMsg {
-  final String role; // 'user' | 'bot'
-  final String text;
-  _ChatMsg({required this.role, required this.text});
 }

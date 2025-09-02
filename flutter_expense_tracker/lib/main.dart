@@ -25,10 +25,12 @@ void main() async {
   }
   await NotificationService.init();
 
-  runApp(ExpenseTrackerApp());
+  runApp(MyApp());
 }
 
-class ExpenseTrackerApp extends StatelessWidget {
+class MyApp extends StatelessWidget {
+  const MyApp({super.key});
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
@@ -37,61 +39,60 @@ class ExpenseTrackerApp extends StatelessWidget {
       theme: ThemeData(
         primaryColor: Colors.blue,
         scaffoldBackgroundColor: Colors.white,
+
         appBarTheme: const AppBarTheme(
           backgroundColor: Colors.blue,
           foregroundColor: Colors.white,
           elevation: 0,
         ),
+
         bottomNavigationBarTheme: const BottomNavigationBarThemeData(
           backgroundColor: Colors.blue,
           selectedItemColor: Colors.white,
           unselectedItemColor: Colors.white60,
         ),
+
         floatingActionButtonTheme: const FloatingActionButtonThemeData(
           backgroundColor: Colors.blue,
           foregroundColor: Colors.white,
         ),
-        textTheme: const TextTheme(
-          bodyMedium: TextStyle(color: Colors.black87),
-          bodyLarge: TextStyle(color: Colors.black87),
-          titleLarge: TextStyle(color: Colors.black),
-        ),
+
+        // ✅ No custom font, use system default
+        // (System fonts already support emojis)
+
         inputDecorationTheme: InputDecorationTheme(
           filled: true,
           fillColor: Colors.grey[100],
           border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
-            borderSide: BorderSide(color: Colors.blue),
+            borderSide: const BorderSide(color: Colors.blue),
           ),
-          labelStyle: TextStyle(color: Colors.black54),
+          labelStyle: const TextStyle(color: Colors.black54),
         ),
       ),
-      home: LoginPage(),
+      home: const AuthGate(),
     );
   }
 }
 
 class AuthGate extends StatelessWidget {
+  const AuthGate({super.key});
+
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<User?>(
       stream: FirebaseAuth.instance.authStateChanges(),
       builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting)
-          return CircularProgressIndicator();
-        if (snapshot.hasData) return ExpenseHomePage(); // User is logged in
-        return LoginPage(); // Not logged in
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
+        }
+        if (snapshot.hasData) {
+          return ExpenseHomePage(); // ✅ Logged in
+        }
+        return LoginPage(); // ✅ Not logged in
       },
-    );
-  }
-}
-
-class MyApp extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      theme: ThemeData.dark(), // or your custom theme
-      home: AuthGate(),
     );
   }
 }

@@ -164,18 +164,19 @@ class ApiService {
     }
   }
 
-  Future<Expense> addExpenseFromText(String text) async {
-    final response = await http.post(
-      Uri.parse('$baseUrl/chat/expense'),
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({"text": text, "user_id": "user123"}),
-    );
+ Future<void> sendChatMessage(String message) async {
+  final response = await http.post(
+    Uri.parse("http://localhost:8000/chat-expense"),
+    headers: {"Content-Type": "application/json"},
+    body: jsonEncode({"message": message}),
+  );
 
-    if (response.statusCode == 200 || response.statusCode == 201) {
-      final data = jsonDecode(response.body);
-      return Expense.fromJson(data['expense']);
-    } else {
-      throw Exception('Failed to create expense from chat: ${response.body}');
-    }
+  if (response.statusCode == 200) {
+    final data = jsonDecode(response.body);
+    print("✅ Expense added: ${data['data']}");
+  } else {
+    print("❌ Failed to add expense");
   }
+}
+
 }

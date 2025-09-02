@@ -20,6 +20,11 @@ from db import get_all_expenses
 from db import expense_collection
 from bson.errors import InvalidId
 import dateparser
+import re
+import spacy
+from models import Expense
+from crud import add_expense
+from nlp_utils import parse_expense_text
 
 # MongoDB setup
 client = MongoClient("mongodb://localhost:27017")
@@ -54,12 +59,18 @@ app.add_middleware(
 
 # Pydantic models
 
-class Expense(BaseModel):
-    id: str
+class ExpenseBase(BaseModel):
     title: str
     amount: float
     category: str
     date: str
+
+class ExpenseCreate(ExpenseBase):
+    pass  # for creating expenses (no id needed)
+
+class Expense(ExpenseBase):
+    id: Optional[str] = None  # id is optional, MongoDB will generate it
+
 
 class Budget(BaseModel):
     amount: float
@@ -439,152 +450,74 @@ async def upload_bill(data: BillUpload):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Unhandled server error: {e}")
     
+class ChatRequest(BaseModel):
+    message: str
 
-CATEGORY_KEYWORDS = {
-    "Food": [
-        "eat", "ate", "lunch", "dinner", "breakfast", "snack",
-        "burger", "biryani", "pizza", "kfc", "mcdonald", "coffee",
-        "restaurant", "meal", "chai", "tea"
-    ],
-    "Transport": [
-        "uber", "careem", "taxi", "bus", "train", "fuel", "petrol",
-        "diesel", "ride", "cab", "fare"
-    ],
-    "Bills": [
-        "bill", "electricity", "gas", "water", "internet", "wifi",
-        "phone", "rent"
-    ],
-    "Shopping": [
-        "grocery", "groceries", "clothes", "shirt", "shoes", "mall",
-        "amazon", "daraz", "market", "shopping"
-    ],
-}
+def parse_expense_text(message: str):
+    message = message.lower()
 
-DEFAULT_CATEGORY = "Other"
-
-def guess_category(text: str) -> str:
-    t = text.lower()
-    for cat, keywords in CATEGORY_KEYWORDS.items():
-        if any(k in t for k in keywords):
-            return cat
-    return DEFAULT_CATEGORY
-
-def extract_amount(text: str) -> Optional[float]:
-    # Try “rs 500”, “500 rs”, “pkr 1,250”, “1250”
-    patterns = [
-        r'(?:rs\.?|pkr)\s*([\d,]+(?:\.\d{1,2})?)',
-        r'([\d,]+(?:\.\d{1,2})?)\s*(?:rs\.?|pkr)'
-    ]
-    for pat in patterns:
-        m = re.search(pat, text, flags=re.IGNORECASE)
-        if m:
-            try:
-                return float(m.group(1).replace(",", ""))
-            except:
-                pass
-    # fallback: first reasonable number
-    m = re.search(r'(\d{1,3}(?:,\d{3})+|\d+)(?:\.\d{1,2})?', text)
-    if m:
-        try:
-            return float(m.group(0).replace(",", ""))
-        except:
-            return None
-    return None
-
-def extract_merchant(text: str) -> Optional[str]:
-    # “at KFC”, “from Imtiaz”
-    for pat in [r'\bat\s+([a-z0-9&\'\-\s]+)', r'\bfrom\s+([a-z0-9&\'\-\s]+)']:
-        m = re.search(pat, text, flags=re.IGNORECASE)
-        if m:
-            return m.group(1).strip().title()
-    return None
-
-def extract_item(text: str) -> Optional[str]:
-    # “I ate a burger ...”, “Bought shoes ...”, “Paid electricity bill ...”
-    patterns = [
-        r'\b(?:ate|had|ordered|bought|purchased|got|paid)\s+(?:a|an|the\s+)?([a-z\s]+?)(?:\s+for|\s+of|\s+at|\s+from|\s+\d|\.|$)',
-    ]
-    for pat in patterns:
-        m = re.search(pat, text, flags=re.IGNORECASE)
-        if m:
-            return m.group(1).strip().title()
-    return None
-
-def extract_date(text: str) -> datetime:
-    # Understand natural language dates. Defaults to today if not found.
-    dt = dateparser.parse(
-        text,
-        settings={
-            "PREFER_DATES_FROM": "past",
-            "RELATIVE_BASE": datetime.now(),  # Asia/Karachi environment time
-            "DATE_ORDER": "DMY"
-        },
-    )
-    return dt or datetime.now()
-
-class ChatExpenseIn(BaseModel):
-    text: str
-    user_id: Optional[str] = "user123"
-
-@app.post("/chat/expense")
-def create_expense_from_text(payload: ChatExpenseIn):
-    text = payload.text.strip()
-    if not text:
-        raise HTTPException(status_code=400, detail="Empty text")
-
-    amount = extract_amount(text)
-    if amount is None:
-        raise HTTPException(status_code=422, detail="Could not detect amount")
-
-    when = extract_date(text).strftime("%Y-%m-%d")
-    merchant = extract_merchant(text)
-    item = extract_item(text)
-
-    # Title strategy: prefer item + merchant
-    if item and merchant:
-        title = f"{item} @ {merchant}"
-    elif item:
-        title = item
-    elif merchant:
-        title = merchant
+    # --- Detect date ---
+    if "yesterday" in message:
+        date = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
     else:
-        # fallback: first few words
-        title = text[:40].strip().rstrip(".")
-        if not title:
-            title = "Expense"
+        date = datetime.now().strftime("%Y-%m-%d")
 
-    category = guess_category(text)
+    # --- Detect amount ---
+    amount_match = re.search(r'(\d+(\.\d{1,2})?)', message)
+    amount = float(amount_match.group()) if amount_match else 0.0
 
-    doc = {
-        "user_id": payload.user_id,
-        "title": title,
-        "amount": float(amount),
-        "category": category,
-        "date": when,
-        "created_at": datetime.utcnow(),
-        "source": "chat",
-        "raw_text": text,
+    # --- Categories ---
+    categories = {
+        "food": ["pizza", "burger", "restaurant", "dinner", "lunch", "breakfast"],
+        "shopping": ["shirt", "jeans", "dress", "clothes", "tshirt", "pant", "shopping", "shoes", "bag"],
+        "transport": ["uber", "bus", "train", "taxi", "petrol", "fuel"],
+        "entertainment": ["movie", "netflix", "game", "concert", "cinema"],
+        "bills": ["gym", "fee", "electricity", "water", "wifi", "internet", "bill", "rent", "subscription"],
     }
-    result = collection.insert_one(doc)
 
-    expense_out = {
-        "id": str(result.inserted_id),
-        "title": doc["title"],
-        "amount": doc["amount"],
-        "category": doc["category"],
-        "date": doc["date"],
-    }
+    category = "other"
+    for cat, keywords in categories.items():
+        if any(word in message for word in keywords):
+            category = cat
+            break
+
+    # --- Extract title ---
+    title = "expense"
+    title_match = re.search(r"(?:bought|got|paid|spent|purchased)\s+(?:for\s+)?(\w+)", message)
+    if title_match:
+        title = title_match.group(1)
+    else:
+        words = [w for w in message.split() if not w.isdigit()]
+        if words:
+            title = words[-1]
 
     return {
-        "message": "Expense created from chat",
-        "expense": expense_out,
-        "parsed": {
-            "amount": amount,
-            "date": when,
-            "merchant": merchant,
-            "item": item,
-            "category": category,
-        },
-    }        
+        "title": title,
+        "amount": amount,
+        "category": category,
+        "date": date,
+    }
+
+@app.post("/chat-expense")
+async def chat_expense(request: ChatRequest):
+    parsed = parse_expense_text(request.message)
+    
+    expense = ExpenseCreate(
+        title=parsed["title"],
+        amount=parsed["amount"],
+        date=parsed["date"],
+        category=parsed["category"]
+    )
+    
+    # Insert into Mongo
+    result = collection.insert_one(expense.dict())
+    
+    return {
+        "message": "Expense added",
+        "data": {**parsed, "id": str(result.inserted_id)}
+    }
+
+
+
 
     #  python -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload

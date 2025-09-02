@@ -880,8 +880,10 @@ class _ExpenseHomePageState extends State<ExpenseHomePage> {
               actions: [
                 IconButton(
                   onPressed: () {
-                    Navigator.push(context,
-                        MaterialPageRoute(builder: (_) => const ChatPage()));
+                    Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                            builder: (_) => const ChatExpenseScreen()));
                   },
                   icon: const Icon(Icons.chat_bubble_outline,
                       color: Colors.white),
