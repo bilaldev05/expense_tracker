@@ -375,7 +375,7 @@ async def upload_bill(data: BillUpload):
                     continue
             
             if prices:
-                # Take the largest price that's likely the total
+               
                 amount = max(prices)
                 print(f"Found amount from prices: {amount}")
         
