@@ -31,6 +31,7 @@ client = MongoClient("mongodb://localhost:27017")
 db = client["expense_db"]
 collection = db["expenses"]
 budget_collection = db["budget"]
+bills_collection = db["bills"]
 
 # FastAPI instance
 app = FastAPI()
@@ -83,6 +84,8 @@ class ExpenseInput(BaseModel):
 
 class Expense(ExpenseInput):
     id: str  
+
+
 
 
 
@@ -432,7 +435,7 @@ async def upload_bill(data: BillUpload):
             "title": title,
             "amount": amount,
             "date": date.strftime("%Y-%m-%d"),
-            "category": "Shopping",  # Default category
+            "category": "Shopping",  
             "created_at": datetime.utcnow()
         }
 
@@ -516,7 +519,6 @@ async def chat_expense(request: ChatRequest):
         "message": "Expense added",
         "data": {**parsed, "id": str(result.inserted_id)}
     }
-
 
 
 

@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+
 import 'package:flutter_expense_tracker/screens/chat_page.dart';
 import 'package:flutter_expense_tracker/screens/graph_page.dart';
 import 'package:flutter_expense_tracker/screens/insights_page.dart';
@@ -909,49 +910,50 @@ class _ExpenseHomePageState extends State<ExpenseHomePage> {
           : null,
       body: _pages[_selectedIndex],
       bottomNavigationBar: SizedBox(
-        height: 56,
-        child: BottomAppBar(
-          color: Colors.blue,
-          shape: const CircularNotchedRectangle(),
-          notchMargin: 6,
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceAround,
-            children: [
-              IconButton(
-                icon: Icon(
-                  Icons.home,
-                  size: 22,
-                  color: _selectedIndex == 0 ? Colors.white : Colors.white70,
-                ),
-                onPressed: () => setState(() => _selectedIndex = 0),
-              ),
-              IconButton(
-                icon: Icon(
-                  Icons.pie_chart,
-                  size: 22,
-                  color: _selectedIndex == 1 ? Colors.white : Colors.white70,
-                ),
-                onPressed: () => setState(() => _selectedIndex = 1),
-              ),
-              const SizedBox(width: 48),
-              IconButton(
-                icon: Icon(
-                  Icons.analytics,
-                  size: 22,
-                  color: _selectedIndex == 2 ? Colors.white : Colors.white70,
-                ),
-                onPressed: () => setState(() => _selectedIndex = 2),
-              ),
-              IconButton(
-                icon: Icon(Icons.show_chart, // <-- Add Graph Icon here
+          height: 56,
+          child: BottomAppBar(
+            color: Colors.blue,
+            shape: const CircularNotchedRectangle(),
+            notchMargin: 6,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
+              children: [
+                IconButton(
+                  icon: Icon(
+                    Icons.home,
                     size: 22,
-                    color: _selectedIndex == 3 ? Colors.white : Colors.white70),
-                onPressed: () => setState(() => _selectedIndex = 3),
-              ),
-            ],
-          ),
-        ),
-      ),
+                    color: _selectedIndex == 0 ? Colors.white : Colors.white70,
+                  ),
+                  onPressed: () => setState(() => _selectedIndex = 0),
+                ),
+                IconButton(
+                  icon: Icon(
+                    Icons.pie_chart,
+                    size: 22,
+                    color: _selectedIndex == 1 ? Colors.white : Colors.white70,
+                  ),
+                  onPressed: () => setState(() => _selectedIndex = 1),
+                ),
+                const SizedBox(width: 48),
+                IconButton(
+                  icon: Icon(
+                    Icons.analytics,
+                    size: 22,
+                    color: _selectedIndex == 2 ? Colors.white : Colors.white70,
+                  ),
+                  onPressed: () => setState(() => _selectedIndex = 2),
+                ),
+                IconButton(
+                  icon: Icon(
+                    Icons.show_chart, // Graph
+                    size: 22,
+                    color: _selectedIndex == 3 ? Colors.white : Colors.white70,
+                  ),
+                  onPressed: () => setState(() => _selectedIndex = 3),
+                ),
+              ],
+            ),
+          )),
       floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
       floatingActionButton: SizedBox(
         width: 48,
