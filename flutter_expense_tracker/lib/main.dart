@@ -57,9 +57,7 @@ class MyApp extends StatelessWidget {
           foregroundColor: Colors.white,
         ),
 
-        // ✅ No custom font, use system default
-        // (System fonts already support emojis)
-
+        
         inputDecorationTheme: InputDecorationTheme(
           filled: true,
           fillColor: Colors.grey[100],
