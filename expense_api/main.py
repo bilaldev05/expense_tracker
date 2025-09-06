@@ -471,7 +471,7 @@ def parse_expense_text(message: str):
 
     # --- Categories ---
     categories = {
-        "food": ["pizza", "burger", "restaurant", "dinner", "lunch", "breakfast"],
+        "food": ["pizza", "burger", "restaurant", "dinner", "lunch", "breakfast", "ate", "ordered", "meal"],
         "shopping": ["shirt", "jeans", "dress", "clothes", "tshirt", "pant", "shopping", "shoes", "bag"],
         "transport": ["uber", "bus", "train", "taxi", "petrol", "fuel"],
         "entertainment": ["movie", "netflix", "game", "concert", "cinema"],
@@ -486,13 +486,23 @@ def parse_expense_text(message: str):
 
     # --- Extract title ---
     title = "expense"
-    title_match = re.search(r"(?:bought|got|paid|spent|purchased)\s+(?:for\s+)?(\w+)", message)
+
+    # Look for verbs + capture following words (up to 3)
+    title_match = re.search(
+        r"(?:ate|had|ordered|bought|got|paid|spent|purchased)\s+(?:a\s+|an\s+|the\s+)?([\w\s]+?)(?:\s+of|\s+for|$|\d)",
+        message
+    )
     if title_match:
-        title = title_match.group(1)
+        title = title_match.group(1).strip()
     else:
-        words = [w for w in message.split() if not w.isdigit()]
-        if words:
-            title = words[-1]
+        # Fallback: use first category keyword found in the message
+        for cat, keywords in categories.items():
+            for word in keywords:
+                if word in message:
+                    title = word
+                    break
+            if title != "expense":
+                break
 
     return {
         "title": title,
@@ -500,6 +510,7 @@ def parse_expense_text(message: str):
         "category": category,
         "date": date,
     }
+
 
 @app.post("/chat-expense")
 async def chat_expense(request: ChatRequest):
