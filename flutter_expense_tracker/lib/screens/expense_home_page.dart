@@ -17,7 +17,7 @@ import 'package:image_picker/image_picker.dart';
 import '../models/expense.dart';
 import 'dart:html' as html;
 
-// Only for Flutter Web
+
 
 class ExpenseHomePage extends StatefulWidget {
   @override
@@ -136,7 +136,7 @@ class _ExpenseHomePageState extends State<ExpenseHomePage> {
         reader.readAsArrayBuffer(file);
         reader.onLoadEnd.listen((e) async {
           final bytes = reader.result as Uint8List;
-          await onPicked(bytes, file.name); // Call the provided callback
+          await onPicked(bytes, file.name); 
         });
       }
     });
@@ -183,7 +183,7 @@ class _ExpenseHomePageState extends State<ExpenseHomePage> {
 
   Future<void> uploadImage(File file) async {
     final uri = Uri.parse(
-        'http://127.0.0.1:8000/upload'); // Replace with your FastAPI endpoint
+        'http://127.0.0.1:8000/upload'); 
 
     final request = http.MultipartRequest('POST', uri)
       ..files.add(await http.MultipartFile.fromPath('file', file.path));
@@ -502,7 +502,7 @@ class _ExpenseHomePageState extends State<ExpenseHomePage> {
   Widget _buildExpenseList() {
     return SingleChildScrollView(
       padding:
-          const EdgeInsets.only(bottom: 80), // Avoid overlap with bottom nav
+          const EdgeInsets.only(bottom: 80), 
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -608,7 +608,7 @@ class _ExpenseHomePageState extends State<ExpenseHomePage> {
                           ),
                         ),
 
-                        // Popup Menu
+                       
                         PopupMenuButton<String>(
                           onSelected: (value) {
                             if (value == 'edit') {
@@ -676,7 +676,7 @@ class _ExpenseHomePageState extends State<ExpenseHomePage> {
         children: [
           Row(
             children: [
-              // Total Expense Card
+              
               Expanded(
                 child: Container(
                   padding: const EdgeInsets.all(16),
