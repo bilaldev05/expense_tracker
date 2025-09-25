@@ -70,7 +70,7 @@ class ExpenseCreate(ExpenseBase):
     pass  # for creating expenses (no id needed)
 
 class Expense(ExpenseBase):
-    id: Optional[str] = None  # id is optional, MongoDB will generate it
+    id: Optional[str] = None 
 
 
 class Budget(BaseModel):
