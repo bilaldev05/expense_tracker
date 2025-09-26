@@ -42,7 +42,7 @@ class _GraphPageState extends State<GraphPage> {
     return _graphData.map((e) {
       try {
         final parsedDate = DateTime.parse(e['date']);
-        return DateFormat.Md().format(parsedDate); // e.g., 7/1
+        return DateFormat.Md().format(parsedDate); 
       } catch (_) {
         return e['date'].toString();
       }
