@@ -388,7 +388,7 @@ async def upload_bill(data: BillUpload):
                 try:
                     num = float(num_str.replace(",", ""))
                     # Filter out numbers that are too small (quantities) or too large (errors)
-                    if 10 <= num <= 10000:  # Reasonable amount range
+                    if 10 <= num <= 10000:  
                         reasonable_numbers.append(num)
                 except:
                     continue
