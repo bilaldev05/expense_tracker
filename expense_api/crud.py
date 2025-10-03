@@ -35,6 +35,6 @@ async def delete_expense(expense_id: int):
 from bson import ObjectId
 
 def serialize_expense(expense):
-    expense['_id'] = str(expense['_id'])  # ensure MongoDB ObjectId is converted to string
+    expense['_id'] = str(expense['_id']) 
     return expense
 

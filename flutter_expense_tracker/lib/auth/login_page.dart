@@ -193,7 +193,7 @@ class _LoginPageState extends State<LoginPage> {
                         ),
                         SizedBox(height: 16),
 
-                        // Sign up button
+                       
                         TextButton(
                           onPressed: () => Navigator.pushReplacement(
                             context,
