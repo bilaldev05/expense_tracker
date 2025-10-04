@@ -15,5 +15,5 @@ class Expense(BaseModel):
     title: str
     amount: float
     date: str
-    category: str  # new field
+    category: str 
 

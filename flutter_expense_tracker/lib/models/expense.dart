@@ -15,7 +15,7 @@ class Expense {
 
   factory Expense.fromJson(Map<String, dynamic> json) {
     return Expense(
-      id: json['id'], // ✅ This line is critical!
+      id: json['id'], 
       title: json['title'] ?? '',
       amount: (json['amount'] as num).toDouble(),
       date: json['date'],
