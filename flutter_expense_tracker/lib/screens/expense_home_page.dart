@@ -730,6 +730,7 @@ class _ExpenseHomePageState extends State<ExpenseHomePage> {
   @override
   Widget build(BuildContext context) {
     final List<Widget> _pages = [
+      // Page 1 — Home
       SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.only(bottom: 8),
@@ -742,20 +743,18 @@ class _ExpenseHomePageState extends State<ExpenseHomePage> {
           ),
         ),
       ),
+
+      // Page 2 — Insights
       InsightsPage(categoryTotals: _calculateCategoryTotals()),
-      FutureBuilder(
-        future: apiService.getMonthlySummary(
-            "${DateTime.now().year}-${DateTime.now().month.toString().padLeft(2, '0')}"),
-        builder: (_, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting)
-            return const Center(child: CircularProgressIndicator());
-          if (snapshot.hasError)
-            return const Center(child: Text("Failed to load summary"));
-          return SummaryPage(summary: snapshot.data!);
-        },
-      ),
+
+      // Page 3 — Summary
+      const SummaryPage(),
+
+      // Page 4 — Graph
       GraphPage(),
     ];
+
+    // Example return (replace with your actual navigation logic)
 
     return Scaffold(
       backgroundColor: Colors.grey.shade100,

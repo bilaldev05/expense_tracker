@@ -25,6 +25,10 @@ import spacy
 from models import Expense
 from crud import add_expense
 from nlp_utils import parse_expense_text
+from fastapi import FastAPI, Query
+from datetime import datetime
+from bson import ObjectId
+from pymongo import MongoClient
 
 # MongoDB setup
 client = MongoClient("mongodb://localhost:27017")
@@ -530,7 +534,45 @@ async def chat_expense(request: ChatRequest):
         "message": "Expense added",
         "data": {**parsed, "id": str(result.inserted_id)}
     }
+@app.get("/expenses/summary")
+def get_month_summary(month: int = Query(...), year: int = Query(...)):
+    start_date = datetime(year, month, 1)
+    end_month = month + 1 if month < 12 else 1
+    end_year = year if month < 12 else year + 1
+    end_date = datetime(end_year, end_month, 1)
 
+    expenses = list(collection.find({
+        "date": {"$gte": start_date.strftime("%Y-%m-%d"), "$lt": end_date.strftime("%Y-%m-%d")}
+    }))
+
+    total = sum(float(e.get("amount", 0)) for e in expenses)
+    count = len(expenses)
+
+    # Group by category
+    category_summary = {}
+    for e in expenses:
+        cat = e.get("category", "other")
+        category_summary[cat] = category_summary.get(cat, 0) + float(e.get("amount", 0))
+
+    # Group by day
+    daily_summary = {}
+    for e in expenses:
+        day = e.get("date")
+        daily_summary[day] = daily_summary.get(day, 0) + float(e.get("amount", 0))
+
+    # Convert ObjectId to string
+    for e in expenses:
+        e["_id"] = str(e["_id"])
+
+    return {
+        "month": month,
+        "year": year,
+        "total_amount": total,
+        "total_entries": count,
+        "by_category": category_summary,
+        "by_day": daily_summary,
+        "entries": expenses,
+    }
 
 
     #  python -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload
