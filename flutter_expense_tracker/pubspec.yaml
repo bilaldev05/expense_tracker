@@ -38,7 +38,8 @@ dependencies:
   intl: ^0.18.1
   image_picker: ^1.1.1
   table_calendar: ^3.0.9
-
+  speech_to_text: ^6.6.2
+  
 
 
   # The following adds the Cupertino Icons font to your application.

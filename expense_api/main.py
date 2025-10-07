@@ -29,6 +29,8 @@ from fastapi import FastAPI, Query
 from datetime import datetime
 from bson import ObjectId
 from pymongo import MongoClient
+import speech_recognition as sr
+from fastapi import FastAPI, File, UploadFile
 
 # MongoDB setup
 client = MongoClient("mongodb://localhost:27017")
@@ -574,5 +576,23 @@ def get_month_summary(month: int = Query(...), year: int = Query(...)):
         "entries": expenses,
     }
 
+@app.post("/voice_expense")
+async def voice_to_expense(file: UploadFile = File(...)):
+    recognizer = sr.Recognizer()
+    with sr.AudioFile(file.file) as source:
+        audio = recognizer.record(source)
+        text = recognizer.recognize_google(audio)
+
+    # Example text: "Add 1000 rupees for groceries today"
+    amount = re.findall(r'\d+', text)
+    category = "food" if "food" in text or "groceries" in text else "misc"
+
+    expense = {
+        "text": text,
+        "amount": float(amount[0]) if amount else 0,
+        "category": category,
+        "date": "today"
+    }
+    return {"status": "success", "parsed_expense": expense}
 
     #  python -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload

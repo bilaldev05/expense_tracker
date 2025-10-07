@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:speech_to_text/speech_to_text.dart' as stt;
 
 class ChatExpenseScreen extends StatefulWidget {
   const ChatExpenseScreen({super.key});
@@ -13,7 +14,42 @@ class _ChatExpenseScreenState extends State<ChatExpenseScreen> {
   final TextEditingController _controller = TextEditingController();
   final List<Map<String, dynamic>> _messages = [];
   final String apiUrl = "http://localhost:8000/chat-expense";
-  bool _isTyping = false; // <-- typing indicator flag
+  bool _isTyping = false;
+  late stt.SpeechToText _speech;
+  bool _isListening = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _speech = stt.SpeechToText();
+  }
+
+  Future<void> _startListening() async {
+    bool available = await _speech.initialize(
+      onError: (val) => setState(() => _isListening = false),
+      onStatus: (val) {
+        if (val == "done") {
+          setState(() => _isListening = false);
+        }
+      },
+    );
+
+    if (available) {
+      setState(() => _isListening = true);
+      _speech.listen(
+        onResult: (val) {
+          setState(() {
+            _controller.text = val.recognizedWords;
+          });
+        },
+      );
+    }
+  }
+
+  Future<void> _stopListening() async {
+    await _speech.stop();
+    setState(() => _isListening = false);
+  }
 
   Future<void> _sendMessage() async {
     String message = _controller.text.trim();
@@ -25,7 +61,7 @@ class _ChatExpenseScreenState extends State<ChatExpenseScreen> {
         "text": message,
         "time": DateTime.now().toString(),
       });
-      _isTyping = true; // show typing indicator
+      _isTyping = true;
     });
     _controller.clear();
 
@@ -49,7 +85,7 @@ class _ChatExpenseScreenState extends State<ChatExpenseScreen> {
             "text": reply,
             "time": DateTime.now().toString(),
           });
-          _isTyping = false; // hide typing indicator
+          _isTyping = false;
         });
       } else {
         setState(() {
@@ -122,7 +158,6 @@ class _ChatExpenseScreenState extends State<ChatExpenseScreen> {
               itemCount: _messages.length + (_isTyping ? 1 : 0),
               itemBuilder: (context, index) {
                 if (_isTyping && index == _messages.length) {
-                  // Typing indicator bubble
                   return Align(
                     alignment: Alignment.centerLeft,
                     child: Container(
@@ -238,12 +273,22 @@ class _ChatExpenseScreenState extends State<ChatExpenseScreen> {
               ),
               child: Row(
                 children: [
+                  GestureDetector(
+                    onLongPressStart: (_) => _startListening(),
+                    onLongPressEnd: (_) => _stopListening(),
+                    child: Icon(
+                      _isListening ? Icons.mic : Icons.mic_none,
+                      color: _isListening ? Colors.red : Colors.grey,
+                      size: 28,
+                    ),
+                  ),
+                  const SizedBox(width: 6),
                   Expanded(
                     child: TextField(
                       controller: _controller,
                       textInputAction: TextInputAction.send,
                       decoration: const InputDecoration(
-                        hintText: "Type an expense...",
+                        hintText: "Type or hold mic to speak...",
                         border: InputBorder.none,
                         contentPadding:
                             EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -270,7 +315,7 @@ class _ChatExpenseScreenState extends State<ChatExpenseScreen> {
   }
 }
 
-/// Animated typing dots widget
+/// Typing dots widget (unchanged)
 class _TypingDots extends StatefulWidget {
   const _TypingDots();
 
