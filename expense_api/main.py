@@ -375,7 +375,7 @@ async def upload_bill(data: BillUpload):
                 try:
                     price = float(price_str)
                     # Filter out unreasonable values (too small or too large)
-                    if 1 <= price <= 10000:  # Reasonable price range
+                    if 1 <= price <= 10000: 
                         prices.append(price)
                 except:
                     continue

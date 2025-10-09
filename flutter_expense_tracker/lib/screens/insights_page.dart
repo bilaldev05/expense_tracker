@@ -228,7 +228,6 @@ class InsightsPage extends StatelessWidget {
     );
   }
 
-  // Reusable card
   Widget _buildCard({required Widget child, Gradient? gradient}) {
     return Container(
       width: double.infinity,

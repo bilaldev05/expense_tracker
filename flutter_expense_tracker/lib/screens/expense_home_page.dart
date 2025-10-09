@@ -39,7 +39,6 @@ class _ExpenseHomePageState extends State<ExpenseHomePage> {
   String _selectedCategory = 'Other';
   int _selectedIndex = 0;
   double _dailyLimit = 0.0;
-  double _forecastedExpense = 0.0;
 
   final Map<String, IconData> categoryIcons = {
     'Food': Icons.fastfood,
@@ -106,10 +105,7 @@ class _ExpenseHomePageState extends State<ExpenseHomePage> {
   }
 
   void _loadForecast() async {
-    final result = await apiService.getForecast();
-    setState(() {
-      _forecastedExpense = result;
-    });
+    setState(() {});
   }
 
   Future<void> _addExpense() async {
