@@ -23,7 +23,7 @@ def parse_expense_text(text: str):
         if ent.label_ in ["ORG", "GPE", "PRODUCT"]:
             title = ent.text
 
-    # Simple category detection
+    
     if any(word in text.lower() for word in ["burger", "pizza", "kfc", "restaurant", "meal", "food"]):
         category = "Food"
     elif any(word in text.lower() for word in ["uber", "bus", "taxi", "fuel", "petrol"]):
