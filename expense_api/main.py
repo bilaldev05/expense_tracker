@@ -108,7 +108,7 @@ def get_expenses():
         expenses = []
         for doc in collection.find():
             expense = {
-                "id": str(doc.get("_id", "")),  # Convert ObjectId to string
+                "id": str(doc.get("_id", "")), 
                 "title": str(doc.get("title") or ""),
                 "amount": float(doc.get("amount", 0)),
                 "category": str(doc.get("category") or ""),
