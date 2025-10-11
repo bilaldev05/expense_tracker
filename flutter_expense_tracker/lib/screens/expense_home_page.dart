@@ -267,26 +267,33 @@ class _ExpenseHomePageState extends State<ExpenseHomePage> {
     required IconData icon,
   }) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.08),
-        borderRadius: BorderRadius.circular(14),
+        gradient: LinearGradient(
+          colors: [
+            Colors.blueAccent.withOpacity(0.08),
+            Colors.white,
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(color: color.withOpacity(0.15), width: 1),
         boxShadow: [
           BoxShadow(
-            color: color.withOpacity(0.1),
-            blurRadius: 8,
-            offset: const Offset(0, 3),
+            color: color.withOpacity(0.05),
+            blurRadius: 5,
+            offset: const Offset(0, 2),
           ),
         ],
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          // ICON (compact size)
+          // Icon
           Container(
-            height: 34,
-            width: 34,
+            height: 20,
+            width: 20,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
               gradient: LinearGradient(
@@ -297,48 +304,47 @@ class _ExpenseHomePageState extends State<ExpenseHomePage> {
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
               ),
-              boxShadow: [
-                BoxShadow(
-                  color: color.withOpacity(0.25),
-                  blurRadius: 6,
-                  offset: const Offset(0, 3),
-                ),
-              ],
             ),
             child: Icon(
               icon,
               color: Colors.white,
-              size: 16, // Smaller, fits nicely
+              size: 10,
             ),
           ),
+          const SizedBox(width: 6),
 
-          const SizedBox(width: 10),
-
-          // TEXT AREA (Title + Value)
-          Expanded(
+          // Text column (wrapped in Flexible to prevent overflow)
+          Flexible(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisAlignment: MainAxisAlignment.center,
+              mainAxisSize: MainAxisSize.min,
               children: [
-                Text(
-                  title,
-                  style: const TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.black87,
-                    letterSpacing: 0.2,
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    title,
+                    style: const TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.black87,
+                    ),
+                    maxLines: 1,
                   ),
-                  overflow: TextOverflow.ellipsis,
                 ),
-                const SizedBox(height: 4),
-                Text(
-                  value,
-                  style: TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w800,
-                    color: color.withOpacity(0.9),
+                const SizedBox(height: 2),
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    value,
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                      color: color.withOpacity(0.9),
+                    ),
+                    maxLines: 1,
                   ),
-                  overflow: TextOverflow.ellipsis,
                 ),
               ],
             ),
@@ -552,26 +558,6 @@ class _ExpenseHomePageState extends State<ExpenseHomePage> {
                   ),
                 ),
                 const SizedBox(width: 14),
-                Expanded(
-                  child: ElevatedButton.icon(
-                    onPressed: pickAndUploadImage,
-                    icon: const Icon(Icons.upload_file_outlined, size: 20),
-                    label: const Text(
-                      "Upload (Mobile)",
-                      style: TextStyle(fontWeight: FontWeight.w600),
-                    ),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.deepPurpleAccent.withOpacity(0.9),
-                      foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      elevation: 2,
-                      shadowColor: Colors.deepPurpleAccent.withOpacity(0.3),
-                    ),
-                  ),
-                ),
               ],
             ),
           ],
@@ -583,11 +569,16 @@ class _ExpenseHomePageState extends State<ExpenseHomePage> {
   Widget _buildExpenseList() {
     if (expenses.isEmpty) {
       return const Padding(
-        padding: EdgeInsets.only(top: 24),
+        padding: EdgeInsets.only(top: 40),
         child: Center(
           child: Text(
-            "No expenses yet",
-            style: TextStyle(color: Colors.grey, fontSize: 16),
+            "No expenses recorded yet 💰",
+            style: TextStyle(
+              color: Colors.grey,
+              fontSize: 16,
+              fontWeight: FontWeight.w500,
+              letterSpacing: 0.3,
+            ),
           ),
         ),
       );
@@ -597,94 +588,167 @@ class _ExpenseHomePageState extends State<ExpenseHomePage> {
       itemCount: expenses.length,
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 80),
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 100),
       itemBuilder: (context, index) {
         final e = expenses[index];
+        final Color accentColor = _getCategoryColor(e.category);
 
         return Container(
-          margin: const EdgeInsets.only(bottom: 12),
+          margin: const EdgeInsets.only(bottom: 14),
           decoration: BoxDecoration(
             color: Colors.white,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: Colors.grey.shade100),
-            boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 4)],
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: Colors.grey.shade200),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black12.withOpacity(0.06),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
+              ),
+            ],
           ),
           child: ListTile(
             contentPadding:
-                const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            leading: CircleAvatar(
-              backgroundColor: Colors.blue.withOpacity(0.08),
-              child: Icon(categoryIcons[e.category] ?? Icons.category,
-                  color: Colors.blue),
-            ),
-            title: Text(e.title,
-                style: const TextStyle(fontWeight: FontWeight.w600)),
-            subtitle: Text("${e.category} • ${e.date}",
-                style: const TextStyle(color: Colors.grey)),
-            trailing: SizedBox(
-              width: 140,
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Expanded(
-                    child: Text(
-                      "Rs. ${e.amount.toStringAsFixed(2)}",
-                      textAlign: TextAlign.end,
-                      style: const TextStyle(
-                        color: Colors.green,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-                  PopupMenuButton<String>(
-                    onSelected: (value) {
-                      if (value == 'edit') {
-                        _showEditDialog({
-                          'id': e.id,
-                          'title': e.title,
-                          'amount': e.amount,
-                          'date': e.date,
-                          'category': e.category,
-                        });
-                      } else if (value == 'delete') {
-                        if (e.id.isNotEmpty) {
-                          _deleteExpense(e.id);
-                        } else {
-                          debugPrint("❌ Skipped delete: ID is null or empty");
-                        }
-                      }
-                    },
-                    itemBuilder: (context) => [
-                      const PopupMenuItem<String>(
-                        value: 'edit',
-                        child: Row(
-                          children: [
-                            Icon(Icons.edit, color: Colors.black54),
-                            SizedBox(width: 8),
-                            Text("Edit"),
-                          ],
-                        ),
-                      ),
-                      const PopupMenuItem<String>(
-                        value: 'delete',
-                        child: Row(
-                          children: [
-                            Icon(Icons.delete, color: Colors.red),
-                            SizedBox(width: 8),
-                            Text("Delete"),
-                          ],
-                        ),
-                      ),
-                    ],
-                    icon: const Icon(Icons.more_vert, color: Colors.black54),
+                const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            leading: Container(
+              height: 44,
+              width: 44,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: LinearGradient(
+                  colors: [
+                    accentColor.withOpacity(0.9),
+                    accentColor.withOpacity(0.6),
+                  ],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: accentColor.withOpacity(0.25),
+                    blurRadius: 6,
+                    offset: const Offset(0, 3),
                   ),
                 ],
               ),
+              child: Icon(
+                categoryIcons[e.category] ?? Icons.category_rounded,
+                color: Colors.white,
+                size: 20,
+              ),
+            ),
+            title: Padding(
+              padding: const EdgeInsets.only(bottom: 2),
+              child: Text(
+                e.title,
+                style: const TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
+                  color: Colors.black87,
+                  letterSpacing: 0.2,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            subtitle: Text(
+              "${e.category} • ${e.date}",
+              style: const TextStyle(
+                color: Colors.black54,
+                fontSize: 13,
+                fontWeight: FontWeight.w500,
+              ),
+              overflow: TextOverflow.ellipsis,
+            ),
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  "Rs. ${e.amount.toStringAsFixed(2)}",
+                  textAlign: TextAlign.end,
+                  style: TextStyle(
+                    color: accentColor,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 14.5,
+                  ),
+                ),
+                PopupMenuButton<String>(
+                  onSelected: (value) {
+                    if (value == 'edit') {
+                      _showEditDialog({
+                        'id': e.id,
+                        'title': e.title,
+                        'amount': e.amount,
+                        'date': e.date,
+                        'category': e.category,
+                      });
+                    } else if (value == 'delete') {
+                      if (e.id.isNotEmpty) {
+                        _deleteExpense(e.id);
+                      } else {
+                        debugPrint("❌ Skipped delete: ID is null or empty");
+                      }
+                    }
+                  },
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  itemBuilder: (context) => [
+                    const PopupMenuItem<String>(
+                      value: 'edit',
+                      child: Row(
+                        children: [
+                          Icon(Icons.edit, color: Colors.black54, size: 18),
+                          SizedBox(width: 8),
+                          Text("Edit",
+                              style: TextStyle(
+                                fontWeight: FontWeight.w500,
+                                fontSize: 14,
+                              )),
+                        ],
+                      ),
+                    ),
+                    const PopupMenuItem<String>(
+                      value: 'delete',
+                      child: Row(
+                        children: [
+                          Icon(Icons.delete_outline,
+                              color: Colors.redAccent, size: 18),
+                          SizedBox(width: 8),
+                          Text("Delete",
+                              style: TextStyle(
+                                fontWeight: FontWeight.w500,
+                                fontSize: 14,
+                              )),
+                        ],
+                      ),
+                    ),
+                  ],
+                  icon: const Icon(Icons.more_vert, color: Colors.black54),
+                ),
+              ],
             ),
           ),
         );
       },
     );
+  }
+
+  /// 🎨 Helper for consistent accent colors
+  MaterialColor _getCategoryColor(String category) {
+    switch (category.toLowerCase()) {
+      case 'food':
+        return Colors.orange;
+      case 'shopping':
+        return Colors.pink;
+      case 'travel':
+        return Colors.blue;
+      case 'bills':
+        return Colors.red;
+      case 'entertainment':
+        return Colors.purple;
+      default:
+        return Colors.teal;
+    }
   }
 
   // === Dialogs ===

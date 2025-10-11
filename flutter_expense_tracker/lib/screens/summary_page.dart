@@ -41,7 +41,7 @@ class _SummaryPageState extends State<SummaryPage> {
       initialDate: DateTime(now.year, now.month),
       firstDate: DateTime(now.year - 2, 1),
       lastDate: DateTime(now.year + 1, 12),
-      selectableDayPredicate: (date) => date.day == 1, // month-level selection
+      selectableDayPredicate: (date) => date.day == 1,
       helpText: 'Select Month',
     );
 
@@ -63,22 +63,23 @@ class _SummaryPageState extends State<SummaryPage> {
     );
 
     return Scaffold(
-      backgroundColor: Colors.grey.shade100,
+      backgroundColor: const Color(0xFFF7F9FC),
       appBar: AppBar(
         backgroundColor: Colors.white,
-        elevation: 2,
+        elevation: 1,
         centerTitle: true,
         title: Row(
           mainAxisSize: MainAxisSize.min,
           children: const [
-            Icon(Icons.analytics, color: Colors.blueAccent, size: 22),
+            Icon(Icons.analytics_rounded, color: Colors.indigoAccent, size: 22),
             SizedBox(width: 8),
             Text(
               "Summary",
               style: TextStyle(
-                fontWeight: FontWeight.w600,
+                fontWeight: FontWeight.w700,
                 fontSize: 18,
                 color: Colors.black87,
+                letterSpacing: 0.2,
               ),
             ),
           ],
@@ -86,24 +87,31 @@ class _SummaryPageState extends State<SummaryPage> {
       ),
       body: Padding(
         padding: const EdgeInsets.all(20),
-        child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 18),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 300),
+          padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 20),
           decoration: BoxDecoration(
-            color: Colors.white.withOpacity(0.95),
-            borderRadius: BorderRadius.circular(20),
+            gradient: LinearGradient(
+              colors: [
+                Colors.blueAccent.withOpacity(0.08),
+                Colors.white,
+              ],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            borderRadius: BorderRadius.circular(24),
             boxShadow: [
               BoxShadow(
-                color: Colors.black12.withOpacity(0.08),
-                blurRadius: 20,
-                spreadRadius: 2,
-                offset: const Offset(0, 8),
+                color: Colors.blueAccent.withOpacity(0.1),
+                blurRadius: 18,
+                offset: const Offset(0, 6),
               ),
             ],
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // 🔹 Month Selector
+              // 🔹 Month Header
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
@@ -111,31 +119,45 @@ class _SummaryPageState extends State<SummaryPage> {
                     monthName,
                     style: const TextStyle(
                       fontSize: 20,
-                      fontWeight: FontWeight.bold,
+                      fontWeight: FontWeight.w800,
                       color: Color(0xFF3F51B5),
                     ),
                   ),
                   IconButton(
-                    icon: const Icon(Icons.calendar_month,
+                    icon: const Icon(Icons.calendar_month_outlined,
                         color: Colors.indigoAccent),
                     onPressed: () => _pickMonth(context),
                   ),
                 ],
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 12),
+              Container(
+                height: 1,
+                color: Colors.grey.withOpacity(0.15),
+              ),
+              const SizedBox(height: 20),
 
-              if (_loading)
-                const Expanded(
-                  child: Center(child: CircularProgressIndicator()),
-                )
-              else if (_summary == null)
-                const Expanded(
-                  child: Center(child: Text("No summary available")),
-                )
-              else
-                Expanded(
-                  child: _buildSummaryList(_summary!),
-                ),
+              // 🔹 Content Area
+              Expanded(
+                child: _loading
+                    ? const Center(
+                        child: CircularProgressIndicator(
+                          color: Colors.indigoAccent,
+                          strokeWidth: 3,
+                        ),
+                      )
+                    : _summary == null
+                        ? const Center(
+                            child: Text(
+                              "No summary available",
+                              style: TextStyle(
+                                fontSize: 15,
+                                color: Colors.black54,
+                              ),
+                            ),
+                          )
+                        : _buildSummaryList(_summary!),
+              ),
             ],
           ),
         ),
@@ -153,53 +175,72 @@ class _SummaryPageState extends State<SummaryPage> {
     return ListView.separated(
       itemCount: points.length,
       separatorBuilder: (_, __) => Divider(
-        color: Colors.grey.shade200,
-        height: 20,
-        thickness: 1,
+        color: Colors.grey.shade300.withOpacity(0.4),
+        height: 22,
+        thickness: 0.8,
       ),
       itemBuilder: (context, index) {
         return TweenAnimationBuilder(
-          duration: Duration(milliseconds: 400 + (index * 100)),
+          duration: Duration(milliseconds: 400 + (index * 80)),
           tween: Tween<double>(begin: 0, end: 1),
           curve: Curves.easeOut,
           builder: (context, value, child) {
             return Opacity(
               opacity: value,
               child: Transform.translate(
-                offset: Offset(0, (1 - value) * 20),
+                offset: Offset(0, (1 - value) * 15),
                 child: child,
               ),
             );
           },
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                margin: const EdgeInsets.only(top: 4),
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: Colors.indigoAccent.withOpacity(0.15),
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(
-                  Icons.check_rounded,
-                  size: 18,
-                  color: Colors.indigoAccent,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  points[index],
-                  style: const TextStyle(
-                    fontSize: 16,
-                    height: 1.6,
-                    color: Colors.black87,
-                    fontWeight: FontWeight.w400,
+          child: Container(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Icon Bubble
+                Container(
+                  margin: const EdgeInsets.only(top: 4),
+                  padding: const EdgeInsets.all(6),
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [
+                        Colors.indigoAccent.withOpacity(0.9),
+                        Colors.blueAccent.withOpacity(0.7),
+                      ],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.indigoAccent.withOpacity(0.2),
+                        blurRadius: 6,
+                        offset: const Offset(0, 3),
+                      ),
+                    ],
+                  ),
+                  child: const Icon(
+                    Icons.check_rounded,
+                    size: 16,
+                    color: Colors.white,
                   ),
                 ),
-              ),
-            ],
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    points[index],
+                    style: const TextStyle(
+                      fontSize: 15.5,
+                      height: 1.6,
+                      color: Colors.black87,
+                      fontWeight: FontWeight.w500,
+                      letterSpacing: 0.1,
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
         );
       },

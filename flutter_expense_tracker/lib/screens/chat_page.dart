@@ -12,11 +12,13 @@ class ChatExpenseScreen extends StatefulWidget {
 
 class _ChatExpenseScreenState extends State<ChatExpenseScreen> {
   final TextEditingController _controller = TextEditingController();
+  final ScrollController _scrollController = ScrollController();
   final List<Map<String, dynamic>> _messages = [];
   final String apiUrl = "http://localhost:8000/chat-expense";
-  bool _isTyping = false;
+
   late stt.SpeechToText _speech;
   bool _isListening = false;
+  bool _isTyping = false;
 
   @override
   void initState() {
@@ -26,11 +28,9 @@ class _ChatExpenseScreenState extends State<ChatExpenseScreen> {
 
   Future<void> _startListening() async {
     bool available = await _speech.initialize(
-      onError: (val) => setState(() => _isListening = false),
+      onError: (_) => setState(() => _isListening = false),
       onStatus: (val) {
-        if (val == "done") {
-          setState(() => _isListening = false);
-        }
+        if (val == "done") setState(() => _isListening = false);
       },
     );
 
@@ -38,9 +38,7 @@ class _ChatExpenseScreenState extends State<ChatExpenseScreen> {
       setState(() => _isListening = true);
       _speech.listen(
         onResult: (val) {
-          setState(() {
-            _controller.text = val.recognizedWords;
-          });
+          setState(() => _controller.text = val.recognizedWords);
         },
       );
     }
@@ -64,6 +62,7 @@ class _ChatExpenseScreenState extends State<ChatExpenseScreen> {
       _isTyping = true;
     });
     _controller.clear();
+    _scrollToBottom();
 
     try {
       final response = await http.post(
@@ -77,36 +76,39 @@ class _ChatExpenseScreenState extends State<ChatExpenseScreen> {
         final parsed = data["data"];
 
         String reply =
-            "✅ Added *${parsed['title']}* of **${parsed['amount']} Rs** under *${parsed['category']}* on ${parsed['date']}";
+            "✅ Added *${parsed['title']}* of **${parsed['amount']} Rs** under *${parsed['category']}* on ${parsed['date']}.";
 
-        setState(() {
-          _messages.add({
-            "sender": "bot",
-            "text": reply,
-            "time": DateTime.now().toString(),
-          });
-          _isTyping = false;
-        });
+        _addBotMessage(reply);
       } else {
-        setState(() {
-          _messages.add({
-            "sender": "bot",
-            "text": "❌ Failed to add expense",
-            "time": DateTime.now().toString(),
-          });
-          _isTyping = false;
-        });
+        _addBotMessage("❌ Failed to add expense. Please try again.");
       }
     } catch (e) {
+      _addBotMessage("⚠️ Error: $e");
+    }
+  }
+
+  void _addBotMessage(String text) {
+    Future.delayed(const Duration(milliseconds: 600), () {
       setState(() {
         _messages.add({
           "sender": "bot",
-          "text": "⚠️ Error: $e",
+          "text": text,
           "time": DateTime.now().toString(),
         });
         _isTyping = false;
       });
-    }
+      _scrollToBottom();
+    });
+  }
+
+  void _scrollToBottom() {
+    Future.delayed(const Duration(milliseconds: 200), () {
+      _scrollController.animateTo(
+        _scrollController.position.maxScrollExtent + 80,
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeOut,
+      );
+    });
   }
 
   String _formatTime(String timestamp) {
@@ -118,35 +120,40 @@ class _ChatExpenseScreenState extends State<ChatExpenseScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.grey.shade100,
+      backgroundColor: const Color(0xffF5F7FB),
       appBar: AppBar(
-        backgroundColor: Colors.white,
-        elevation: 4,
+        backgroundColor: Colors.blueAccent,
+        elevation: 0,
+        toolbarHeight: 70,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(bottom: Radius.circular(20)),
+        ),
         title: Row(
-          children: const [
-            CircleAvatar(
-              radius: 18,
+          children: [
+            const CircleAvatar(
+              radius: 22,
               backgroundColor: Colors.white,
-              child: Icon(Icons.smart_toy, color: Colors.blueAccent, size: 20),
+              child: Icon(Icons.smart_toy_rounded,
+                  color: Colors.blueAccent, size: 24),
             ),
-            SizedBox(width: 10),
-            Column(
+            const SizedBox(width: 12),
+            const Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
                   "Expense Bot",
                   style: TextStyle(
-                    color: Colors.black87,
+                    color: Colors.white,
                     fontSize: 18,
-                    fontWeight: FontWeight.w600,
+                    fontWeight: FontWeight.w700,
                   ),
                 ),
                 Text(
-                  "Online",
+                  "Online • Assistant",
                   style: TextStyle(fontSize: 12, color: Colors.white70),
                 ),
               ],
-            )
+            ),
           ],
         ),
       ),
@@ -154,48 +161,16 @@ class _ChatExpenseScreenState extends State<ChatExpenseScreen> {
         children: [
           Expanded(
             child: ListView.builder(
+              controller: _scrollController,
               padding: const EdgeInsets.all(16),
               itemCount: _messages.length + (_isTyping ? 1 : 0),
               itemBuilder: (context, index) {
                 if (_isTyping && index == _messages.length) {
-                  return Align(
-                    alignment: Alignment.centerLeft,
-                    child: Container(
-                      margin: const EdgeInsets.symmetric(vertical: 6),
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 14, vertical: 10),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(18),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withOpacity(0.05),
-                            blurRadius: 6,
-                            offset: const Offset(0, 3),
-                          ),
-                        ],
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Text(
-                            "Bot is typing",
-                            style: TextStyle(
-                              fontSize: 14,
-                              color: Colors.black54,
-                              fontStyle: FontStyle.italic,
-                            ),
-                          ),
-                          const SizedBox(width: 6),
-                          _TypingDots(),
-                        ],
-                      ),
-                    ),
-                  );
+                  return const _TypingBubble();
                 }
 
                 final msg = _messages[index];
-                bool isUser = msg["sender"] == "user";
+                final isUser = msg["sender"] == "user";
 
                 return AnimatedContainer(
                   duration: const Duration(milliseconds: 300),
@@ -210,14 +185,16 @@ class _ChatExpenseScreenState extends State<ChatExpenseScreen> {
                     children: [
                       Container(
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 14, vertical: 12),
+                            horizontal: 16, vertical: 12),
                         constraints: BoxConstraints(
-                          maxWidth: MediaQuery.of(context).size.width * 0.75,
-                        ),
+                            maxWidth: MediaQuery.of(context).size.width * 0.75),
                         decoration: BoxDecoration(
                           gradient: isUser
                               ? const LinearGradient(
-                                  colors: [Colors.blueAccent, Colors.lightBlue],
+                                  colors: [
+                                    Color(0xff007BFF),
+                                    Color(0xff00A8E8)
+                                  ],
                                   begin: Alignment.topLeft,
                                   end: Alignment.bottomRight,
                                 )
@@ -227,7 +204,7 @@ class _ChatExpenseScreenState extends State<ChatExpenseScreen> {
                           boxShadow: [
                             BoxShadow(
                               color: Colors.black.withOpacity(0.05),
-                              blurRadius: 6,
+                              blurRadius: 8,
                               offset: const Offset(0, 3),
                             ),
                           ],
@@ -236,9 +213,8 @@ class _ChatExpenseScreenState extends State<ChatExpenseScreen> {
                           msg["text"]!,
                           style: TextStyle(
                             fontSize: 15,
+                            height: 1.4,
                             color: isUser ? Colors.white : Colors.black87,
-                            fontWeight:
-                                isUser ? FontWeight.w500 : FontWeight.normal,
                           ),
                         ),
                       ),
@@ -256,17 +232,19 @@ class _ChatExpenseScreenState extends State<ChatExpenseScreen> {
               },
             ),
           ),
+
+          // --- Message Input Bar ---
           SafeArea(
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              margin: const EdgeInsets.all(8),
+              margin: const EdgeInsets.fromLTRB(12, 0, 12, 10),
               decoration: BoxDecoration(
                 color: Colors.white,
                 borderRadius: BorderRadius.circular(30),
                 boxShadow: [
                   BoxShadow(
                     color: Colors.black.withOpacity(0.08),
-                    blurRadius: 10,
+                    blurRadius: 8,
                     offset: const Offset(0, 3),
                   ),
                 ],
@@ -278,31 +256,36 @@ class _ChatExpenseScreenState extends State<ChatExpenseScreen> {
                     onLongPressEnd: (_) => _stopListening(),
                     child: Icon(
                       _isListening ? Icons.mic : Icons.mic_none,
-                      color: _isListening ? Colors.red : Colors.grey,
-                      size: 28,
+                      color: _isListening ? Colors.redAccent : Colors.grey,
+                      size: 26,
                     ),
                   ),
-                  const SizedBox(width: 6),
+                  const SizedBox(width: 8),
                   Expanded(
                     child: TextField(
                       controller: _controller,
                       textInputAction: TextInputAction.send,
                       decoration: const InputDecoration(
-                        hintText: "Type or hold mic to speak...",
+                        hintText: "Type a message or hold mic...",
                         border: InputBorder.none,
-                        contentPadding:
-                            EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        hintStyle:
+                            TextStyle(color: Colors.black38, fontSize: 14),
                       ),
                       onSubmitted: (_) => _sendMessage(),
                     ),
                   ),
-                  CircleAvatar(
-                    radius: 22,
-                    backgroundColor: Colors.blueAccent,
-                    child: IconButton(
-                      icon: const Icon(Icons.send_rounded,
+                  GestureDetector(
+                    onTap: _sendMessage,
+                    child: Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: const BoxDecoration(
+                        shape: BoxShape.circle,
+                        gradient: LinearGradient(
+                          colors: [Color(0xff007BFF), Color(0xff00A8E8)],
+                        ),
+                      ),
+                      child: const Icon(Icons.send_rounded,
                           color: Colors.white, size: 20),
-                      onPressed: _sendMessage,
                     ),
                   ),
                 ],
@@ -315,7 +298,35 @@ class _ChatExpenseScreenState extends State<ChatExpenseScreen> {
   }
 }
 
-/// Typing dots widget (unchanged)
+/// Typing bubble for bot
+class _TypingBubble extends StatelessWidget {
+  const _TypingBubble();
+
+  @override
+  Widget build(BuildContext context) {
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Container(
+        margin: const EdgeInsets.symmetric(vertical: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(18),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.05),
+              blurRadius: 6,
+              offset: const Offset(0, 3),
+            ),
+          ],
+        ),
+        child: const _TypingDots(),
+      ),
+    );
+  }
+}
+
+/// Typing animation dots
 class _TypingDots extends StatefulWidget {
   const _TypingDots();
 
@@ -352,12 +363,12 @@ class _TypingDotsState extends State<_TypingDots>
           mainAxisSize: MainAxisSize.min,
           children: List.generate(3, (i) {
             return Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 1.5),
+              padding: const EdgeInsets.symmetric(horizontal: 2),
               child: Opacity(
                 opacity: tick == i ? 1.0 : 0.3,
                 child: const Text(
                   "•",
-                  style: TextStyle(fontSize: 14, color: Colors.black54),
+                  style: TextStyle(fontSize: 16, color: Colors.black54),
                 ),
               ),
             );
