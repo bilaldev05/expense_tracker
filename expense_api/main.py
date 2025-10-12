@@ -31,7 +31,8 @@ from bson import ObjectId
 from pymongo import MongoClient
 import speech_recognition as sr
 from fastapi import FastAPI, File, UploadFile
-
+import openai 
+from typing import Dict, List
 # MongoDB setup
 client = MongoClient("mongodb://localhost:27017")
 db = client["expense_db"]
@@ -39,6 +40,7 @@ collection = db["expenses"]
 budget_collection = db["budget"]
 bills_collection = db["bills"]
 
+openai.api_key = "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"
 # FastAPI instance
 app = FastAPI()
 
@@ -94,7 +96,43 @@ class Expense(ExpenseInput):
 
 
 
+class SpendingData(BaseModel):
+    month: str  # e.g., "2025-10"
+    total_amount: float
+    by_category: Dict[str, float]
 
+@app.post("/ai-recommendations", response_model=List[str])
+async def ai_recommendations(spending: SpendingData):
+    """
+    Generate AI-based recommendations based on monthly spending.
+    """
+    # Prepare the prompt for AI
+    prompt = f"""
+    You are a financial assistant. Here is the user's monthly spending data:
+    Month: {spending.month}
+    Total Spending: Rs. {spending.total_amount}
+    Breakdown by category:
+    {chr(10).join([f"{cat}: Rs. {amt}" for cat, amt in spending.by_category.items()])}
+
+    Provide 3-5 actionable recommendations for the user to optimize their spending, 
+    reduce unnecessary expenses, and save more money. Return each recommendation as a short string.
+    """
+
+    try:
+        response = openai.ChatCompletion.create(
+           model="gpt-3.5-turbo", 
+
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.7,
+            max_tokens=200,
+        )
+        # Extract recommendations
+        text = response.choices[0].message.content.strip()
+        # Split by newlines or numbered list
+        recommendations = [line.strip("-–0123456789. ").strip() for line in text.split("\n") if line.strip()]
+        return recommendations[:5]  # limit to 5 recommendations
+    except Exception as e:
+        return [f"Error generating recommendations: {str(e)}"]
 # Expense Endpoints
 @app.post("/expenses")
 def add_expense(expense: ExpenseInput):
@@ -521,21 +559,13 @@ def parse_expense_text(message: str):
 @app.post("/chat-expense")
 async def chat_expense(request: ChatRequest):
     parsed = parse_expense_text(request.message)
-    
-    expense = ExpenseCreate(
-        title=parsed["title"],
-        amount=parsed["amount"],
-        date=parsed["date"],
-        category=parsed["category"]
-    )
-    
-    # Insert into Mongo
+    return {"data": parsed}
+
+@app.post("/confirm-expense")
+async def confirm_expense(expense: ExpenseInput):
     result = collection.insert_one(expense.dict())
-    
-    return {
-        "message": "Expense added",
-        "data": {**parsed, "id": str(result.inserted_id)}
-    }
+    return {"message": "Expense added", "id": str(result.inserted_id)}
+
 @app.get("/expenses/summary")
 def get_month_summary(month: int = Query(...), year: int = Query(...)):
     start_date = datetime(year, month, 1)
@@ -583,7 +613,7 @@ async def voice_to_expense(file: UploadFile = File(...)):
         audio = recognizer.record(source)
         text = recognizer.recognize_google(audio)
 
-    # Example text: "Add 1000 rupees for groceries today"
+    
     amount = re.findall(r'\d+', text)
     category = "food" if "food" in text or "groceries" in text else "misc"
 
@@ -594,5 +624,12 @@ async def voice_to_expense(file: UploadFile = File(...)):
         "date": "today"
     }
     return {"status": "success", "parsed_expense": expense}
+
+@app.post("/chat-expense/confirm")
+async def confirm_expense(data: dict):
+    # Save confirmed expense in DB
+    expense = Expense(**data)
+    db.expenses.insert_one(expense.dict())
+    return {"message": "Expense added successfully"}
 
     #  python -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload

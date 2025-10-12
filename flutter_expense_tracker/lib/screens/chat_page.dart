@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter_expense_tracker/screens/expense_home_page.dart';
 import 'package:http/http.dart' as http;
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 
@@ -14,11 +15,13 @@ class _ChatExpenseScreenState extends State<ChatExpenseScreen> {
   final TextEditingController _controller = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   final List<Map<String, dynamic>> _messages = [];
-  final String apiUrl = "http://localhost:8000/chat-expense";
 
+  final String baseUrl = "http://localhost:8000";
   late stt.SpeechToText _speech;
   bool _isListening = false;
   bool _isTyping = false;
+
+  Map<String, dynamic>? _pendingExpense;
 
   @override
   void initState() {
@@ -49,6 +52,7 @@ class _ChatExpenseScreenState extends State<ChatExpenseScreen> {
     setState(() => _isListening = false);
   }
 
+  /// 🔹 Step 1: Send message — backend just parses (no DB insert yet)
   Future<void> _sendMessage() async {
     String message = _controller.text.trim();
     if (message.isEmpty) return;
@@ -66,7 +70,7 @@ class _ChatExpenseScreenState extends State<ChatExpenseScreen> {
 
     try {
       final response = await http.post(
-        Uri.parse(apiUrl),
+        Uri.parse("$baseUrl/chat-expense"),
         headers: {"Content-Type": "application/json"},
         body: jsonEncode({"message": message}),
       );
@@ -75,24 +79,77 @@ class _ChatExpenseScreenState extends State<ChatExpenseScreen> {
         final data = jsonDecode(response.body);
         final parsed = data["data"];
 
-        String reply =
-            "✅ Added *${parsed['title']}* of **${parsed['amount']} Rs** under *${parsed['category']}* on ${parsed['date']}.";
+        // Store temporarily for confirmation
+        _pendingExpense = parsed;
 
-        _addBotMessage(reply);
+        _addBotMessage(
+          "💬 You said: *${parsed['title']}* for **${parsed['amount']} Rs** under *${parsed['category']}*.\n\nWould you like to confirm this expense?",
+          type: "confirmation",
+        );
       } else {
-        _addBotMessage("❌ Failed to add expense. Please try again.");
+        _addBotMessage("❌ Failed to process expense.");
       }
     } catch (e) {
       _addBotMessage("⚠️ Error: $e");
     }
   }
 
-  void _addBotMessage(String text) {
+  /// 🔹 Step 2: Confirm and actually add to DB
+  Future<void> _confirmExpense() async {
+    if (_pendingExpense == null) return;
+
+    try {
+      final response = await http.post(
+        Uri.parse("$baseUrl/confirm-expense"),
+        headers: {"Content-Type": "application/json"},
+        body: jsonEncode(_pendingExpense),
+      );
+
+      if (response.statusCode == 200) {
+        setState(() {
+          _messages.add({
+            "sender": "bot",
+            "text":
+                "✅ Added *${_pendingExpense!['title']}* of **${_pendingExpense!['amount']} Rs** under *${_pendingExpense!['category']}* on ${_pendingExpense!['date']}.",
+            "time": DateTime.now().toString(),
+          });
+        });
+
+        _pendingExpense = null;
+
+        // ✅ Delay for bot message animation
+        Future.delayed(const Duration(milliseconds: 800), () {
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (context) => const ExpenseHomePage()),
+          );
+        });
+      } else {
+        _addBotMessage("❌ Failed to add expense to database.");
+      }
+    } catch (e) {
+      _addBotMessage("⚠️ Error adding expense: $e");
+    }
+  }
+
+  void _cancelExpense() {
+    setState(() {
+      _messages.add({
+        "sender": "bot",
+        "text": "❌ Expense cancelled.",
+        "time": DateTime.now().toString(),
+      });
+      _pendingExpense = null;
+    });
+  }
+
+  void _addBotMessage(String text, {String type = "normal"}) {
     Future.delayed(const Duration(milliseconds: 600), () {
       setState(() {
         _messages.add({
           "sender": "bot",
           "text": text,
+          "type": type,
           "time": DateTime.now().toString(),
         });
         _isTyping = false;
@@ -172,6 +229,67 @@ class _ChatExpenseScreenState extends State<ChatExpenseScreen> {
                 final msg = _messages[index];
                 final isUser = msg["sender"] == "user";
 
+                // 🔸 Confirmation message
+                if (msg["type"] == "confirmation") {
+                  return Align(
+                    alignment: Alignment.centerLeft,
+                    child: Container(
+                      margin: const EdgeInsets.symmetric(vertical: 6),
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(18),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.05),
+                            blurRadius: 6,
+                            offset: const Offset(0, 3),
+                          ),
+                        ],
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            msg["text"],
+                            style: const TextStyle(
+                              fontSize: 15,
+                              color: Colors.black87,
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          Row(
+                            children: [
+                              ElevatedButton.icon(
+                                onPressed: _confirmExpense,
+                                icon: const Icon(Icons.check_circle,
+                                    color: Colors.white, size: 18),
+                                label: const Text(
+                                  "Confirm",
+                                  style: TextStyle(color: Colors.white),
+                                ),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.green,
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              OutlinedButton.icon(
+                                onPressed: _cancelExpense,
+                                icon: const Icon(Icons.close, size: 18),
+                                label: const Text("Cancel"),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                }
+
+                // 🔸 Normal messages
                 return AnimatedContainer(
                   duration: const Duration(milliseconds: 300),
                   curve: Curves.easeOut,
@@ -233,7 +351,7 @@ class _ChatExpenseScreenState extends State<ChatExpenseScreen> {
             ),
           ),
 
-          // --- Message Input Bar ---
+          // 🔹 Input Bar
           SafeArea(
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -298,7 +416,7 @@ class _ChatExpenseScreenState extends State<ChatExpenseScreen> {
   }
 }
 
-/// Typing bubble for bot
+/// Typing animation bubble
 class _TypingBubble extends StatelessWidget {
   const _TypingBubble();
 
@@ -326,7 +444,7 @@ class _TypingBubble extends StatelessWidget {
   }
 }
 
-/// Typing animation dots
+/// Typing dots animation
 class _TypingDots extends StatefulWidget {
   const _TypingDots();
 

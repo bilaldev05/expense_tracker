@@ -79,13 +79,97 @@ class ApiService {
     }
   }
 
-  Future<String> getMonthlySummary(String month) async {
-    final response = await http.get(Uri.parse('$baseUrl/summary/$month'));
-    if (response.statusCode == 200) {
-      final data = jsonDecode(response.body);
-      return data['summary'];
-    } else {
-      throw Exception('Failed to load summary');
+  Future<Map<String, dynamic>> getMonthlySummary(String month) async {
+    try {
+      final parts = month.split('-');
+      final int year = int.parse(parts[0]);
+      final int monthNum = int.parse(parts[1]);
+
+      final response = await http.get(
+        Uri.parse(
+            "http://127.0.0.1:8000/expenses/summary?month=$monthNum&year=$year"),
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+
+        // ✅ Extract data safely
+        final Map<String, dynamic> categoryData =
+            (data['by_category'] ?? {}) as Map<String, dynamic>;
+
+        final double totalAmount = (data['total_amount'] is num)
+            ? (data['total_amount']).toDouble()
+            : 0.0;
+
+        // ✅ Try to read from backend if available
+        String? summaryText = data['summaryText']?.toString();
+
+        // ✅ Try to get expense list (if backend returns it)
+        final expenses = (data['expenses'] is List)
+            ? List<Map<String, dynamic>>.from(data['expenses'])
+            : [];
+
+        // ✅ If backend didn't provide summary, generate AI one
+        if (summaryText == null || summaryText.trim().isEmpty) {
+          int totalEntries = expenses.isNotEmpty
+              ? expenses.length
+              : categoryData.isNotEmpty
+                  ? categoryData.length
+                  : 0;
+
+          double total = 0;
+          double highestExpense = 0;
+          double lowestExpense = double.infinity;
+
+          // ✅ Calculate totals from expenses if available
+          if (expenses.isNotEmpty) {
+            for (var e in expenses) {
+              double amount = double.tryParse(e['amount'].toString()) ?? 0.0;
+              total += amount;
+              if (amount > highestExpense) highestExpense = amount;
+              if (amount < lowestExpense) lowestExpense = amount;
+            }
+          }
+          // ✅ If no individual expenses, use category data
+          else if (categoryData.isNotEmpty) {
+            categoryData.forEach((key, value) {
+              double amount = (value is num) ? value.toDouble() : 0.0;
+              total += amount;
+              if (amount > highestExpense) highestExpense = amount;
+              if (amount < lowestExpense) lowestExpense = amount;
+            });
+          } else {
+            total = totalAmount;
+            highestExpense = totalAmount;
+            lowestExpense = totalAmount;
+          }
+
+          double averageExpense = totalEntries > 0 ? total / totalEntries : 0.0;
+
+          summaryText = '''
+AI Summary for $month:
+- Total Entries: $totalEntries
+- Total Spending: Rs. ${total.toStringAsFixed(2)}
+- Highest Expense: Rs. ${highestExpense.toStringAsFixed(2)}
+- Lowest Expense: Rs. ${lowestExpense == double.infinity ? 0 : lowestExpense.toStringAsFixed(2)}
+- Average Expense: Rs. ${averageExpense.toStringAsFixed(2)}
+''';
+        }
+
+        return {
+          'total_amount': totalAmount,
+          'summaryText': summaryText,
+          'by_category': categoryData,
+        };
+      } else {
+        throw Exception('Failed to load summary: ${response.statusCode}');
+      }
+    } catch (e) {
+      return {
+        'summaryText': 'Error fetching summary data.',
+        'total_amount': 0.0,
+        'by_category': {},
+      };
     }
   }
 
@@ -177,6 +261,23 @@ class ApiService {
       print("✅ Expense added: ${data['data']}");
     } else {
       print("❌ Failed to add expense");
+    }
+  }
+
+  Future<List<String>> fetchAIRecommendations(
+      Map<String, dynamic> spendingData) async {
+    final response = await http.post(
+      Uri.parse('$baseUrl/ai-recommendations'),
+      headers: {"Content-Type": "application/json"},
+      body: json.encode(spendingData),
+    );
+
+    if (response.statusCode == 200) {
+      final List<dynamic> data = json.decode(response.body);
+      return data.map((e) => e.toString()).toList();
+    } else {
+      throw Exception(
+          'Failed to load AI recommendations: ${response.statusCode}');
     }
   }
 }
