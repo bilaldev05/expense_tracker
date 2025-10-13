@@ -530,36 +530,47 @@ class _ExpenseHomePageState extends State<ExpenseHomePage> {
             const SizedBox(height: 28),
 
             /// ACTION BUTTONS
-            Row(
-              children: [
-                Expanded(
-                  child: ElevatedButton.icon(
-                    onPressed: () {
-                      pickImageWeb(
-                          (Uint8List imageBytes, String fileName) async {
-                        await uploadImageWeb(imageBytes, fileName);
-                      });
-                    },
-                    icon: const Icon(Icons.image_outlined, size: 20),
-                    label: const Text(
-                      "Extract Image",
-                      style: TextStyle(fontWeight: FontWeight.w600),
-                    ),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.blueAccent.withOpacity(0.9),
-                      foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      elevation: 2,
-                      shadowColor: Colors.blueAccent.withOpacity(0.3),
+            Row(children: [
+              Expanded(
+                child: ElevatedButton.icon(
+                  onPressed: () {
+                    pickImageWeb((Uint8List imageBytes, String fileName) async {
+                      await uploadImageWeb(imageBytes, fileName);
+                    });
+                  },
+                  icon: const Icon(Icons.image_outlined, size: 20),
+                  label: const Text(
+                    "Extract Image",
+                    style: TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.blueAccent.withOpacity(0.9),
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
                     ),
                   ),
                 ),
-                const SizedBox(width: 14),
-              ],
-            ),
+              ),
+              const SizedBox(width: 14),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.blueAccent.withOpacity(0.9),
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                ),
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                        builder: (_) => const ChatExpenseScreen()),
+                  );
+                },
+                child: const Text('Add via Chat'),
+              )
+            ]),
           ],
         ),
       ),
@@ -1011,17 +1022,6 @@ class _ExpenseHomePageState extends State<ExpenseHomePage> {
                 Text("Home", style: TextStyle(color: Colors.black87)),
               ]),
               actions: [
-                IconButton(
-                  onPressed: () {
-                    Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                            builder: (_) => const ChatExpenseScreen()));
-                  },
-                  icon: const Icon(Icons.chat_bubble_outline,
-                      color: Colors.black54),
-                  tooltip: 'Add via Chat',
-                ),
                 IconButton(
                   onPressed: _logout,
                   icon: const Icon(Icons.logout, color: Colors.black54),
