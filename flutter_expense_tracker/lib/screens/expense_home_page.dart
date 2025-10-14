@@ -5,6 +5,7 @@ import 'dart:html' as html;
 
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter_expense_tracker/screens/finance_chat_screen.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 
@@ -89,8 +90,9 @@ class _ExpenseHomePageState extends State<ExpenseHomePage> {
 
   Future<void> _loadDailyLimit() async {
     try {
-      final response =
-          await http.get(Uri.parse('http://localhost:8000/daily-limit'));
+      final response = await http.get(
+        Uri.parse('http://localhost:8000/daily-limit'), // ✅ use localhost
+      );
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         setState(() {
@@ -530,47 +532,96 @@ class _ExpenseHomePageState extends State<ExpenseHomePage> {
             const SizedBox(height: 28),
 
             /// ACTION BUTTONS
-            Row(children: [
-              Expanded(
-                child: ElevatedButton.icon(
-                  onPressed: () {
-                    pickImageWeb((Uint8List imageBytes, String fileName) async {
-                      await uploadImageWeb(imageBytes, fileName);
-                    });
-                  },
-                  icon: const Icon(Icons.image_outlined, size: 20),
-                  label: const Text(
-                    "Extract Image",
-                    style: TextStyle(fontWeight: FontWeight.w600),
-                  ),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.blueAccent.withOpacity(0.9),
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(
+            Row(
+              children: [
+                // === Extract Image Button ===
+                Expanded(
+                  child: Container(
+                    decoration: BoxDecoration(
+                      gradient: const LinearGradient(
+                        colors: [
+                          Color(0xFF2196F3),
+                          Color(0xFF21CBF3)
+                        ], // shared blue gradient
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
                       borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: ElevatedButton.icon(
+                      onPressed: () {
+                        pickImageWeb(
+                            (Uint8List imageBytes, String fileName) async {
+                          await uploadImageWeb(imageBytes, fileName);
+                        });
+                      },
+                      icon: const Icon(Icons.image_outlined,
+                          size: 20, color: Colors.white),
+                      label: const Text(
+                        "Extract Image",
+                        style: TextStyle(
+                          fontWeight: FontWeight.w600,
+                          color: Colors.white,
+                        ),
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.transparent,
+                        shadowColor: Colors.transparent,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                      ),
                     ),
                   ),
                 ),
-              ),
-              const SizedBox(width: 14),
-              ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.blueAccent.withOpacity(0.9),
-                  foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14),
+
+                const SizedBox(width: 14),
+
+                // === Add via Chat Button ===
+                Expanded(
+                  child: Container(
+                    decoration: BoxDecoration(
+                      gradient: const LinearGradient(
+                        colors: [
+                          Color(0xFF2196F3),
+                          Color(0xFF21CBF3)
+                        ], // same blue gradient
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: ElevatedButton.icon(
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) => const ChatExpenseScreen()),
+                        );
+                      },
+                      icon: const Icon(Icons.chat_bubble_outline,
+                          size: 20, color: Colors.white),
+                      label: const Text(
+                        'Add via Chat',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w600,
+                          color: Colors.white,
+                        ),
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.transparent,
+                        shadowColor: Colors.transparent,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                      ),
+                    ),
                   ),
                 ),
-                onPressed: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                        builder: (_) => const ChatExpenseScreen()),
-                  );
-                },
-                child: const Text('Add via Chat'),
-              )
-            ]),
+              ],
+            )
           ],
         ),
       ),
@@ -1025,6 +1076,17 @@ class _ExpenseHomePageState extends State<ExpenseHomePage> {
                 IconButton(
                   onPressed: _logout,
                   icon: const Icon(Icons.logout, color: Colors.black54),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.chat_bubble_outline,
+                      color: Colors.blueAccent),
+                  onPressed: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                          builder: (_) => const FinanceChatScreen()),
+                    );
+                  },
                 ),
               ],
             )

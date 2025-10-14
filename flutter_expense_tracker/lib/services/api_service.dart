@@ -4,7 +4,7 @@ import 'package:http/http.dart' as http;
 import '../models/expense.dart';
 
 class ApiService {
-  final String baseUrl = "http://192.168.100.4:8000";
+  final String baseUrl = "http://localhost:8000";
 
   Future<Map<String, dynamic>> getInsights() async {
     final response = await http.get(Uri.parse('$baseUrl/insights'));

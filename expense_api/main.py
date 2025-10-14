@@ -11,6 +11,8 @@ import os
 import re
 from fastapi.encoders import jsonable_encoder
 import io
+
+import pymongo
 from PIL import Image
 import pytesseract
 import pandas as pd
@@ -32,7 +34,17 @@ from pymongo import MongoClient
 import speech_recognition as sr
 from fastapi import FastAPI, File, UploadFile
 import openai 
+import requests
+from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
+import torch
 from typing import Dict, List
+import traceback
+from concurrent.futures import ThreadPoolExecutor
+import logging
+
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
+
 # MongoDB setup
 client = MongoClient("mongodb://localhost:27017")
 db = client["expense_db"]
@@ -41,7 +53,21 @@ budget_collection = db["budget"]
 bills_collection = db["bills"]
 
 openai.api_key = os.getenv("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")
+model_name = "facebook/opt-350m"
+tokenizer = AutoTokenizer.from_pretrained(model_name)
+model = AutoModelForCausalLM.from_pretrained(model_name, torch_dtype=torch.float32)
+generator = pipeline("text-generation", model=model, tokenizer=tokenizer)
+
+# ---------- DATABASE CONNECTION ----------
+client = pymongo.MongoClient("mongodb://localhost:27017/")
+db = client["expense_db"]
+expenses = db["expenses"]
+
+# Local transformer model (e.g., fine-tuned or default)
+model = pipeline("text-generation", model="distilgpt2")
+
 # FastAPI instance
+
 app = FastAPI()
 
 # Upload directory
@@ -92,6 +118,9 @@ class ExpenseInput(BaseModel):
 
 class Expense(ExpenseInput):
     id: str  
+
+class ChatRequest(BaseModel):
+    message: str    
 
 
 
@@ -631,5 +660,39 @@ async def confirm_expense(data: dict):
     expense = Expense(**data)
     db.expenses.insert_one(expense.dict())
     return {"message": "Expense added successfully"}
+
+# ThreadPoolExecutor for running blocking generation
+_executor = ThreadPoolExecutor(max_workers=1)
+
+@app.post("/ai-chat")
+async def ai_chat(request: Request):
+    try:
+        body = await request.json()
+        message = body.get("message")
+
+        if not message:
+            return {"response": "No message provided."}
+
+        # 🧠 Get data from your database to use in response
+        total_expense = sum([e["amount"] for e in expenses.find()])
+        last_expense = expenses.find_one(sort=[("_id", -1)])
+
+        # Give the model some app context
+        context_prompt = (
+            f"You are a finance assistant for an expense tracker app.\n"
+            f"User message: {message}\n"
+            f"Total expenses: {total_expense}\n"
+            f"Last expense: {last_expense}\n"
+            f"Respond concisely about user's expense data only."
+        )
+
+        # Generate model response
+        response_text = model(context_prompt, max_length=100, num_return_sequences=1)[0]['generated_text']
+
+        return {"response": response_text.strip()}
+
+    except Exception as e:
+        print("Error:", e)
+        return {"response": f"Error: {str(e)}"}
 
     #  python -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload
