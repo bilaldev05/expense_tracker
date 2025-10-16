@@ -41,6 +41,14 @@ from typing import Dict, List
 import traceback
 from concurrent.futures import ThreadPoolExecutor
 import logging
+from transformers import (
+    pipeline,
+    AutoTokenizer,
+    AutoModelForSeq2SeqLM  # ✅ This is the missing one
+)
+import random
+
+
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -52,21 +60,116 @@ collection = db["expenses"]
 budget_collection = db["budget"]
 bills_collection = db["bills"]
 
-
-model_name = "facebook/opt-350m"
-tokenizer = AutoTokenizer.from_pretrained(model_name)
-model = AutoModelForCausalLM.from_pretrained(model_name, torch_dtype=torch.float32)
-generator = pipeline("text-generation", model=model, tokenizer=tokenizer)
-
-# ---------- DATABASE CONNECTION ----------
+openai.api_key = os.getenv("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")
 client = pymongo.MongoClient("mongodb://localhost:27017/")
 db = client["expense_db"]
 expenses = db["expenses"]
 
-# Local transformer model (e.g., fine-tuned or default)
-model = pipeline("text-generation", model="distilgpt2")
+# ---------- MODELS ----------
+print("🟢 Loading flan-t5-small...")
+small_model_name = "google/flan-t5-small"
+small_tokenizer = AutoTokenizer.from_pretrained(small_model_name)
+small_model = AutoModelForSeq2SeqLM.from_pretrained(small_model_name)
+small_generator = pipeline("text2text-generation", model=small_model, tokenizer=small_tokenizer, device=-1)
 
-# FastAPI instance
+print("🔵 Loading flan-t5-base...")
+base_model_name = "google/flan-t5-base"
+base_tokenizer = AutoTokenizer.from_pretrained(base_model_name)
+base_model = AutoModelForSeq2SeqLM.from_pretrained(base_model_name)
+base_generator = pipeline("text2text-generation", model=base_model, tokenizer=base_tokenizer, device=-1)
+
+torch.set_num_threads(2)
+
+# ---------- REQUEST SCHEMA ----------
+class ChatRequest(BaseModel):
+    message: str
+
+# ---------- DATE HELPERS ----------
+def get_date_range(message: str):
+    now = datetime.now()
+
+    if "today" in message:
+        start = datetime(now.year, now.month, now.day)
+        end = start + timedelta(days=1)
+        label = "today"
+    elif "yesterday" in message:
+        start = datetime(now.year, now.month, now.day) - timedelta(days=1)
+        end = start + timedelta(days=1)
+        label = "yesterday"
+    elif "this week" in message or "current week" in message:
+        start = now - timedelta(days=now.weekday())
+        end = start + timedelta(days=7)
+        label = "this week"
+    elif "last week" in message or "previous week" in message:
+        end = now - timedelta(days=now.weekday())
+        start = end - timedelta(days=7)
+        label = "last week"
+    elif "this month" in message or "current month" in message:
+        start = datetime(now.year, now.month, 1)
+        if now.month == 12:
+            end = datetime(now.year + 1, 1, 1)
+        else:
+            end = datetime(now.year, now.month + 1, 1)
+        label = "this month"
+    elif "last month" in message or "previous month" in message:
+        if now.month == 1:
+            start = datetime(now.year - 1, 12, 1)
+        else:
+            start = datetime(now.year, now.month - 1, 1)
+        end = datetime(now.year, now.month, 1)
+        label = "last month"
+    else:
+        return None, None, None
+
+    return start, end, label
+
+
+def make_date_query(start, end):
+    """Handles both string and datetime date fields."""
+    return {
+        "$or": [
+            {"date": {"$gte": start, "$lt": end}},  # datetime field
+            {"date": {"$gte": start.strftime("%Y-%m-%d"), "$lt": end.strftime("%Y-%m-%d")}}  # string field
+        ]
+    }
+
+# ---------- EXPENSE SUMMARY ----------
+def summarize_expenses(filter_query=None):
+    all_expenses = list(expenses.find(filter_query or {}))
+    print(f"📦 Found {len(all_expenses)} matching records for query: {filter_query}")
+
+    if not all_expenses:
+        return {
+            "summary": "No expense data found.",
+            "total": 0,
+            "categories": {},
+            "top_category": None,
+            "recent": None,
+        }
+
+    total = sum(e.get("amount", 0) for e in all_expenses)
+    categories = {}
+    for e in all_expenses:
+        cat = e.get("category", "Other")
+        categories[cat] = categories.get(cat, 0) + e.get("amount", 0)
+
+    top_category = max(categories, key=categories.get)
+    avg_expense = total / len(all_expenses)
+    recent = all_expenses[-1]
+
+    return {
+        "summary": (
+            f"Total: {total:.2f} PKR\n"
+            f"Average per entry: {avg_expense:.2f} PKR\n"
+            f"Top category: {top_category} ({categories[top_category]:.2f} PKR)\n"
+            f"Most recent: {recent.get('category', 'N/A')} - {recent.get('amount', 0)} PKR"
+        ),
+        "total": total,
+        "categories": categories,
+        "top_category": top_category,
+        "recent": recent,
+    }
+
 
 app = FastAPI()
 
@@ -664,35 +767,117 @@ async def confirm_expense(data: dict):
 # ThreadPoolExecutor for running blocking generation
 _executor = ThreadPoolExecutor(max_workers=1)
 
+
 @app.post("/ai-chat")
-async def ai_chat(request: Request):
+async def ai_chat(request: ChatRequest):
     try:
-        body = await request.json()
-        message = body.get("message")
+        user_message = request.message.lower().strip()
 
-        if not message:
-            return {"response": "No message provided."}
+        # 1️⃣ TIME RANGE DETECTION
+        start, end, label = get_date_range(user_message)
+        filter_query = {}
+        if start and end:
+            filter_query = {"timestamp": {"$gte": start, "$lt": end}}
 
-        # 🧠 Get data from your database to use in response
-        total_expense = sum([e["amount"] for e in expenses.find()])
-        last_expense = expenses.find_one(sort=[("_id", -1)])
+        data = summarize_expenses(filter_query)
 
-        # Give the model some app context
-        context_prompt = (
-            f"You are a finance assistant for an expense tracker app.\n"
-            f"User message: {message}\n"
-            f"Total expenses: {total_expense}\n"
-            f"Last expense: {last_expense}\n"
-            f"Respond concisely about user's expense data only."
-        )
+        if data["total"] == 0:
+            return {"response": f"📂 No expenses found for {label or 'the selected period'}."}
 
-        # Generate model response
-        response_text = model(context_prompt, max_length=100, num_return_sequences=1)[0]['generated_text']
+        # 2️⃣ INTENT DETECTION
+        if re.search(r"\b(total|sum|spend|spent)\b", user_message):
+            msg = f"💰 You spent **{data['total']:.2f} PKR** {f'{label}' if label else 'overall'}."
+            return {"response": msg}
 
-        return {"response": response_text.strip()}
+        elif re.search(r"\b(top|highest|most|category)\b", user_message):
+            top = data["top_category"]
+            amt = data["categories"][top]
+            return {"response": f"🏆 Your top spending category {f'{label}' if label else ''} is **{top}** with **{amt:.2f} PKR**."}
+
+        elif re.search(r"\b(recent|last|latest)\b", user_message):
+            r = data["recent"]
+            return {"response": f"🕒 Most recent expense: **{r.get('category', 'N/A')}** - {r.get('amount', 0)} PKR."}
+
+        # 3️⃣ SAVINGS / ADVICE REQUEST
+        elif re.search(r"\b(saving|save|advice|tip|budget|plan)\b", user_message):
+            summary_text = (
+                f"Total spent: {data['total']:.2f} PKR. "
+                f"Top category: {data['top_category']}. "
+                f"Recent expense: {data['recent'].get('category', '')} - {data['recent'].get('amount', 0)} PKR."
+            )
+
+            prompt = (
+                f"You are FinMate, a friendly financial advisor.\n"
+                f"Here’s the user's spending summary:\n{summary_text}\n\n"
+                f"User asked: '{request.message}'\n"
+                f"Give short, smart, and actionable financial tips in a helpful tone.\n"
+                f"Format:\n"
+                f"💰 Summary:\n🧠 Insight:\n✅ Advice:\n📈 Next Step:\n"
+            )
+
+            # 🔁 Base model with retry + min_length
+            try:
+                result = base_generator(
+                    prompt,
+                    max_new_tokens=200,
+                    min_length=80,
+                    do_sample=True,
+                    top_p=0.9,
+                    temperature=0.8,
+                )
+                text = result[0].get("generated_text", "").strip()
+
+                if len(text) < 40:
+                    # retry once with slightly different params
+                    result = base_generator(prompt, max_new_tokens=220, do_sample=True)
+                    text = result[0].get("generated_text", "").strip()
+
+                if len(text) < 40:
+                    raise ValueError("Base output too short")
+
+                return {"response": text}
+
+            except Exception as e:
+                print(f"⚠️ Base model failed: {e}")
+                result = small_generator(
+                    prompt,
+                    max_new_tokens=150,
+                    do_sample=True,
+                    temperature=0.7,
+                )
+                text = result[0].get("generated_text", "").strip()
+                return {"response": text or "💡 Try keeping a weekly budget and reviewing your top spending category."}
+
+        # 4️⃣ GENERAL QUERY → fallback understanding
+        else:
+            context = summarize_expenses()
+            summary_text = (
+                f"Total spent: {context['total']:.2f} PKR. "
+                f"Top category: {context['top_category']}. "
+                f"Recent: {context['recent'].get('category', '')} - {context['recent'].get('amount', 0)} PKR."
+            )
+            prompt = (
+                f"You are FinMate, a smart financial assistant.\n"
+                f"Data summary: {summary_text}\n"
+                f"User asked: '{request.message}'.\n"
+                f"Respond naturally, clearly, and helpfully."
+            )
+
+            result = base_generator(
+                prompt,
+                max_new_tokens=180,
+                min_length=50,
+                do_sample=True,
+                temperature=0.8,
+                top_p=0.9,
+            )
+            text = result[0].get("generated_text", "").strip()
+            if not text:
+                text = "🤖 Sorry, I couldn’t understand that. Try asking about your spending or savings."
+            return {"response": text}
 
     except Exception as e:
-        print("Error:", e)
-        return {"response": f"Error: {str(e)}"}
+        print("❌ Error:", e)
+        return {"response": "⚠️ Something went wrong. Please try again later."}
 
     #  python -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload
