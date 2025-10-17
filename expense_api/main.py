@@ -1,3 +1,7 @@
+import asyncio
+from calendar import calendar
+import hashlib
+from unittest import result
 from fastapi import FastAPI, HTTPException, Request, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -47,7 +51,10 @@ from transformers import (
     AutoModelForSeq2SeqLM  # ✅ This is the missing one
 )
 import random
+import calendar as cal
 
+
+app = FastAPI()
 
 
 logger = logging.getLogger(__name__)
@@ -61,118 +68,134 @@ budget_collection = db["budget"]
 bills_collection = db["bills"]
 
 openai.api_key = os.getenv("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")
-client = pymongo.MongoClient("mongodb://localhost:27017/")
+model_name = "google/flan-t5-base"
+tokenizer = AutoTokenizer.from_pretrained(model_name)
+model = AutoModelForSeq2SeqLM.from_pretrained(model_name, torch_dtype=torch.float16)
+model.eval()
+
+# -----------------------------------------------------
+# 2️⃣ Database Connection
+# -----------------------------------------------------
+client = MongoClient("mongodb://localhost:27017")
 db = client["expense_db"]
 expenses = db["expenses"]
 
-# ---------- MODELS ----------
-print("🟢 Loading flan-t5-small...")
-small_model_name = "google/flan-t5-small"
-small_tokenizer = AutoTokenizer.from_pretrained(small_model_name)
-small_model = AutoModelForSeq2SeqLM.from_pretrained(small_model_name)
-small_generator = pipeline("text2text-generation", model=small_model, tokenizer=small_tokenizer, device=-1)
+# -----------------------------------------------------
+# 3️⃣ Simple In-memory Cache
+# -----------------------------------------------------
+cache = {}
 
-print("🔵 Loading flan-t5-base...")
-base_model_name = "google/flan-t5-base"
-base_tokenizer = AutoTokenizer.from_pretrained(base_model_name)
-base_model = AutoModelForSeq2SeqLM.from_pretrained(base_model_name)
-base_generator = pipeline("text2text-generation", model=base_model, tokenizer=base_tokenizer, device=-1)
+def get_cache_key(user_query: str):
+    return hashlib.md5(user_query.lower().encode()).hexdigest()
 
-torch.set_num_threads(2)
-
-# ---------- REQUEST SCHEMA ----------
+# -----------------------------------------------------
+# 4️⃣ Request Schema
+# -----------------------------------------------------
 class ChatRequest(BaseModel):
     message: str
 
-# ---------- DATE HELPERS ----------
-def get_date_range(message: str):
-    now = datetime.now()
+# -----------------------------------------------------
+# 5️⃣ Expense Summary Generator
+# -----------------------------------------------------
+def summarize_expenses(query_filter):
+    data = list(expenses.find(query_filter))
+    if not data:
+        return "No expenses found in that period."
 
-    if "today" in message:
-        start = datetime(now.year, now.month, now.day)
-        end = start + timedelta(days=1)
-        label = "today"
-    elif "yesterday" in message:
-        start = datetime(now.year, now.month, now.day) - timedelta(days=1)
-        end = start + timedelta(days=1)
-        label = "yesterday"
-    elif "this week" in message or "current week" in message:
-        start = now - timedelta(days=now.weekday())
-        end = start + timedelta(days=7)
-        label = "this week"
-    elif "last week" in message or "previous week" in message:
-        end = now - timedelta(days=now.weekday())
-        start = end - timedelta(days=7)
-        label = "last week"
-    elif "this month" in message or "current month" in message:
-        start = datetime(now.year, now.month, 1)
-        if now.month == 12:
-            end = datetime(now.year + 1, 1, 1)
-        else:
-            end = datetime(now.year, now.month + 1, 1)
-        label = "this month"
-    elif "last month" in message or "previous month" in message:
-        if now.month == 1:
-            start = datetime(now.year - 1, 12, 1)
-        else:
-            start = datetime(now.year, now.month - 1, 1)
-        end = datetime(now.year, now.month, 1)
-        label = "last month"
-    else:
-        return None, None, None
-
-    return start, end, label
-
-
-def make_date_query(start, end):
-    """Handles both string and datetime date fields."""
-    return {
-        "$or": [
-            {"date": {"$gte": start, "$lt": end}},  # datetime field
-            {"date": {"$gte": start.strftime("%Y-%m-%d"), "$lt": end.strftime("%Y-%m-%d")}}  # string field
-        ]
-    }
-
-# ---------- EXPENSE SUMMARY ----------
-def summarize_expenses(filter_query=None):
-    all_expenses = list(expenses.find(filter_query or {}))
-    print(f"📦 Found {len(all_expenses)} matching records for query: {filter_query}")
-
-    if not all_expenses:
-        return {
-            "summary": "No expense data found.",
-            "total": 0,
-            "categories": {},
-            "top_category": None,
-            "recent": None,
-        }
-
-    total = sum(e.get("amount", 0) for e in all_expenses)
+    total = sum(item["amount"] for item in data)
     categories = {}
-    for e in all_expenses:
-        cat = e.get("category", "Other")
-        categories[cat] = categories.get(cat, 0) + e.get("amount", 0)
+    for item in data:
+        cat = item.get("category", "Other")
+        categories[cat] = categories.get(cat, 0) + item["amount"]
 
-    top_category = max(categories, key=categories.get)
-    avg_expense = total / len(all_expenses)
-    recent = all_expenses[-1]
+    breakdown = ", ".join([f"{cat}: {amt}" for cat, amt in categories.items()])
+    return f"Total spent: {total} PKR. Breakdown: {breakdown}"
 
+# -----------------------------------------------------
+# 6️⃣ Time Range Detector
+# -----------------------------------------------------
+def detect_date_range(user_query: str):
+    """
+    Detects the date range (start, end) based on the user's query.
+    Returns a MongoDB-style filter: {"date": {"$gte": start, "$lte": end}}
+    """
+    now = datetime.now()
+    user_query = user_query.lower()
+
+    start_date, end_date = None, None
+
+    # --- Today ---
+    if "today" in user_query:
+        start_date = end_date = now
+
+    # --- Yesterday ---
+    elif "yesterday" in user_query:
+        start_date = end_date = now - timedelta(days=1)
+
+    # --- This Week ---
+    elif "this week" in user_query:
+        start_date = now - timedelta(days=now.weekday())  # Monday
+        end_date = now
+
+    # --- Last Week ---
+    elif "last week" in user_query:
+        last_monday = now - timedelta(days=now.weekday() + 7)
+        start_date = last_monday
+        end_date = last_monday + timedelta(days=6)
+
+    # --- This Month ---
+    elif "this month" in user_query or "october" in user_query:  # Added direct month word matching
+        start_date = now.replace(day=1)
+        end_date = now
+
+    # --- Last Month ---
+    elif "last month" in user_query or "previous month" in user_query:
+        first_day_this_month = now.replace(day=1)
+        last_month_end = first_day_this_month - timedelta(days=1)
+        start_date = last_month_end.replace(day=1)
+        end_date = last_month_end
+
+    # --- This Year ---
+    elif "this year" in user_query:
+        start_date = datetime(now.year, 1, 1)
+        end_date = now
+
+    # --- Last Year ---
+    elif "last year" in user_query or "previous year" in user_query:
+        start_date = datetime(now.year - 1, 1, 1)
+        end_date = datetime(now.year - 1, 12, 31)
+
+    # --- Month Names (like "in September", "from March") ---
+    else:
+        months = [
+            "january", "february", "march", "april", "may", "june",
+            "july", "august", "september", "october", "november", "december"
+        ]
+        for i, month in enumerate(months, start=1):
+            if month in user_query:
+                year = now.year
+                # If month is greater than current, assume previous year
+                if i > now.month:
+                    year -= 1
+                start_date = datetime(year, i, 1)
+                # Compute last day of month
+                if i == 12:
+                    end_date = datetime(year, 12, 31)
+                else:
+                    end_date = datetime(year, i + 1, 1) - timedelta(days=1)
+                break
+
+    # --- Fallback: All Data ---
+    if not start_date or not end_date:
+        return {}
+
+    # Format for MongoDB
     return {
-        "summary": (
-            f"Total: {total:.2f} PKR\n"
-            f"Average per entry: {avg_expense:.2f} PKR\n"
-            f"Top category: {top_category} ({categories[top_category]:.2f} PKR)\n"
-            f"Most recent: {recent.get('category', 'N/A')} - {recent.get('amount', 0)} PKR"
-        ),
-        "total": total,
-        "categories": categories,
-        "top_category": top_category,
-        "recent": recent,
+        "date": {
+            "$gte": start_date.strftime("%Y-%m-%d"),
+            "$lte": end_date.strftime("%Y-%m-%d")
+        }
     }
-
-
-app = FastAPI()
-
 # Upload directory
 UPLOAD_DIR = "uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
@@ -486,11 +509,9 @@ async def upload_bill(data: BillUpload):
             _, encoded = data.image_base64.split(",", 1)
         else:
             encoded = data.image_base64
-
         image_data = base64.b64decode(encoded)
         filename = f"{uuid.uuid4()}.jpg"
         filepath = os.path.join(UPLOAD_DIR, filename)
-
         with open(filepath, "wb") as f:
             f.write(image_data)
 
@@ -506,10 +527,10 @@ async def upload_bill(data: BillUpload):
         # --- Title Extraction ---
         lines = [line.strip() for line in text.strip().splitlines() if line.strip()]
         title = lines[0] if lines else "Auto Expense"
-        
+
         # --- Improved Total Amount Extraction ---
         amount = 0.0
-        
+
         # Strategy 1: Look for common total patterns with context
         total_patterns = [
             r"(?:net\s+total|total\s+amount|amount\s+payable|grand\s+total|total\s+payable|total)\s*[:|]?\s*[^\d]*([\d,]+\.?\d{0,2})",
@@ -517,7 +538,6 @@ async def upload_bill(data: BillUpload):
             r"([\d,]+\.\d{2})\s*$",  # Amount with decimal at end of line
             r"total.*?(\d+\.\d{2})",  # Total followed by amount with decimal
         ]
-        
         for pattern in total_patterns:
             matches = re.finditer(pattern, text, re.IGNORECASE)
             for match in matches:
@@ -533,46 +553,41 @@ async def upload_bill(data: BillUpload):
                     continue
             if amount > 0:
                 break
-        
+
         # Strategy 2: If patterns didn't work, find all monetary values and take the largest reasonable one
         if amount == 0.0:
             # Look for numbers with decimal points (likely prices)
             price_pattern = r"(\d{1,3}(?:,\d{3})*\.\d{2})|(\d+\.\d{2})"
             prices = []
-            
             for match in re.finditer(price_pattern, text):
                 price_str = match.group(0).replace(",", "")
                 try:
                     price = float(price_str)
                     # Filter out unreasonable values (too small or too large)
-                    if 1 <= price <= 10000: 
+                    if 1 <= price <= 10000:
                         prices.append(price)
                 except:
                     continue
-            
             if prices:
-               
                 amount = max(prices)
                 print(f"Found amount from prices: {amount}")
-        
+
         # Strategy 3: As a last resort, find all numbers and take the largest reasonable one
         if amount == 0.0:
             all_numbers = re.findall(r"(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)", text)
             reasonable_numbers = []
-            
             for num_str in all_numbers:
                 try:
                     num = float(num_str.replace(",", ""))
                     # Filter out numbers that are too small (quantities) or too large (errors)
-                    if 10 <= num <= 10000:  
+                    if 10 <= num <= 10000:
                         reasonable_numbers.append(num)
                 except:
                     continue
-            
             if reasonable_numbers:
                 amount = max(reasonable_numbers)
                 print(f"Found amount from reasonable numbers: {amount}")
-        
+
         # --- Date Extraction ---
         date_str = None
         date_patterns = [
@@ -581,13 +596,12 @@ async def upload_bill(data: BillUpload):
             r"(\d{1,2}[-/]\d{1,2}[-/]\d{2,4})",
             r"(\d{1,2}[-/][a-z]{3,}[-/]\d{2,4})"
         ]
-        
         for pattern in date_patterns:
             date_match = re.search(pattern, text, re.IGNORECASE)
             if date_match:
                 date_str = date_match.group(1)
                 break
-        
+
         if not date_str:
             date_str = datetime.today().strftime("%d-%b-%Y")
 
@@ -611,12 +625,11 @@ async def upload_bill(data: BillUpload):
             "title": title,
             "amount": amount,
             "date": date.strftime("%Y-%m-%d"),
-            "category": "Shopping",  
+            "category": "Shopping",
             "created_at": datetime.utcnow()
         }
 
         result = collection.insert_one(expense)
-
         expense["_id"] = str(result.inserted_id)
         expense["created_at"] = expense["created_at"].isoformat()
 
@@ -628,9 +641,11 @@ async def upload_bill(data: BillUpload):
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Unhandled server error: {e}")
-    
+
+
 class ChatRequest(BaseModel):
     message: str
+
 
 def parse_expense_text(message: str):
     message = message.lower()
@@ -662,7 +677,6 @@ def parse_expense_text(message: str):
 
     # --- Extract title ---
     title = "expense"
-
     # Look for verbs + capture following words (up to 3)
     title_match = re.search(
         r"(?:ate|had|ordered|bought|got|paid|spent|purchased)\s+(?:a\s+|an\s+|the\s+)?([\w\s]+?)(?:\s+of|\s+for|$|\d)",
@@ -693,10 +707,11 @@ async def chat_expense(request: ChatRequest):
     parsed = parse_expense_text(request.message)
     return {"data": parsed}
 
-@app.post("/confirm-expense")
+@app.post("/confirm-expense") 
 async def confirm_expense(expense: ExpenseInput):
     result = collection.insert_one(expense.dict())
     return {"message": "Expense added", "id": str(result.inserted_id)}
+    
 
 @app.get("/expenses/summary")
 def get_month_summary(month: int = Query(...), year: int = Query(...)):
@@ -770,114 +785,193 @@ _executor = ThreadPoolExecutor(max_workers=1)
 
 @app.post("/ai-chat")
 async def ai_chat(request: ChatRequest):
-    try:
-        user_message = request.message.lower().strip()
+    """
+    Improved ai_chat:
+    - robust date & category detection
+    - safe prompts for flan-t5-base
+    - rule-based fallback for advice and short/echoed outputs
+    - handles "last expense" correctly
+    """
+    user_query = request.message.strip()
+    cache_key = get_cache_key(user_query)
 
-        # 1️⃣ TIME RANGE DETECTION
-        start, end, label = get_date_range(user_message)
-        filter_query = {}
-        if start and end:
-            filter_query = {"timestamp": {"$gte": start, "$lt": end}}
+    # Return cached response if exists
+    if cache_key in cache:
+        return {"response": cache[cache_key]["text"], "cached": True}
 
-        data = summarize_expenses(filter_query)
+    # ---------- Helper: small rule-based advice generator ----------
+    def rule_based_advice(summary_dict):
+        total = summary_dict.get("total", 0)
+        cats = summary_dict.get("categories", {})
+        tips = []
 
-        if data["total"] == 0:
-            return {"response": f"📂 No expenses found for {label or 'the selected period'}."}
-
-        # 2️⃣ INTENT DETECTION
-        if re.search(r"\b(total|sum|spend|spent)\b", user_message):
-            msg = f"💰 You spent **{data['total']:.2f} PKR** {f'{label}' if label else 'overall'}."
-            return {"response": msg}
-
-        elif re.search(r"\b(top|highest|most|category)\b", user_message):
-            top = data["top_category"]
-            amt = data["categories"][top]
-            return {"response": f"🏆 Your top spending category {f'{label}' if label else ''} is **{top}** with **{amt:.2f} PKR**."}
-
-        elif re.search(r"\b(recent|last|latest)\b", user_message):
-            r = data["recent"]
-            return {"response": f"🕒 Most recent expense: **{r.get('category', 'N/A')}** - {r.get('amount', 0)} PKR."}
-
-        # 3️⃣ SAVINGS / ADVICE REQUEST
-        elif re.search(r"\b(saving|save|advice|tip|budget|plan)\b", user_message):
-            summary_text = (
-                f"Total spent: {data['total']:.2f} PKR. "
-                f"Top category: {data['top_category']}. "
-                f"Recent expense: {data['recent'].get('category', '')} - {data['recent'].get('amount', 0)} PKR."
-            )
-
-            prompt = (
-                f"You are FinMate, a friendly financial advisor.\n"
-                f"Here’s the user's spending summary:\n{summary_text}\n\n"
-                f"User asked: '{request.message}'\n"
-                f"Give short, smart, and actionable financial tips in a helpful tone.\n"
-                f"Format:\n"
-                f"💰 Summary:\n🧠 Insight:\n✅ Advice:\n📈 Next Step:\n"
-            )
-
-            # 🔁 Base model with retry + min_length
-            try:
-                result = base_generator(
-                    prompt,
-                    max_new_tokens=200,
-                    min_length=80,
-                    do_sample=True,
-                    top_p=0.9,
-                    temperature=0.8,
-                )
-                text = result[0].get("generated_text", "").strip()
-
-                if len(text) < 40:
-                    # retry once with slightly different params
-                    result = base_generator(prompt, max_new_tokens=220, do_sample=True)
-                    text = result[0].get("generated_text", "").strip()
-
-                if len(text) < 40:
-                    raise ValueError("Base output too short")
-
-                return {"response": text}
-
-            except Exception as e:
-                print(f"⚠️ Base model failed: {e}")
-                result = small_generator(
-                    prompt,
-                    max_new_tokens=150,
-                    do_sample=True,
-                    temperature=0.7,
-                )
-                text = result[0].get("generated_text", "").strip()
-                return {"response": text or "💡 Try keeping a weekly budget and reviewing your top spending category."}
-
-        # 4️⃣ GENERAL QUERY → fallback understanding
+        # Tip 1: target largest category
+        if cats:
+            top_cat = max(cats.items(), key=lambda x: x[1])[0]
+            tips.append(f"You're spending most on *{top_cat}*. Try reducing that category by 10% next month.")
         else:
-            context = summarize_expenses()
-            summary_text = (
-                f"Total spent: {context['total']:.2f} PKR. "
-                f"Top category: {context['top_category']}. "
-                f"Recent: {context['recent'].get('category', '')} - {context['recent'].get('amount', 0)} PKR."
-            )
-            prompt = (
-                f"You are FinMate, a smart financial assistant.\n"
-                f"Data summary: {summary_text}\n"
-                f"User asked: '{request.message}'.\n"
-                f"Respond naturally, clearly, and helpfully."
-            )
+            tips.append("Start by tracking all purchases for a week so we can spot easy savings.")
 
-            result = base_generator(
-                prompt,
-                max_new_tokens=180,
-                min_length=50,
-                do_sample=True,
-                temperature=0.8,
-                top_p=0.9,
-            )
-            text = result[0].get("generated_text", "").strip()
-            if not text:
-                text = "🤖 Sorry, I couldn’t understand that. Try asking about your spending or savings."
-            return {"response": text}
+        # Tip 2: general spending rule
+        if total > 20000:
+            tips.append("Your total spending is high — set a weekly limit and review subscriptions.")
+        else:
+            tips.append("You're within a reasonable range — keep tracking and try a small weekly budget to save more.")
 
+        # Tip 3: simple habit
+        tips.append("Avoid impulse buys: wait 24 hours before non-essential purchases over 2,000 PKR.")
+
+        return " ".join(tips)
+
+    # ---------- Summarization logic (runs in executor to avoid blocking) ----------
+    def summarize_text_local(user_query: str):
+        # detect period & categories (uses your existing detect_date_range())
+        query_filter = detect_date_range(user_query)
+
+        # detect categories
+        categories_list = [
+            "food", "transport", "shopping", "groceries", "bills",
+            "entertainment", "health", "rent", "education", "travel", "utilities"
+        ]
+        detected_categories = [c for c in categories_list if c in user_query.lower()]
+
+        # build mongo filter for categories if needed
+        if detected_categories:
+            # preserve existing date filter possibly empty dict
+            if isinstance(query_filter, dict):
+                query_filter = dict(query_filter)  # shallow copy
+            else:
+                query_filter = {}
+            query_filter["category"] = {"$in": detected_categories}
+
+        # last-expense detection
+        if any(k in user_query.lower() for k in ["last expense", "recent expense", "latest expense", "what was my last expense"]):
+            last_doc = db.expenses.find_one(sort=[("_id", -1)])
+            if not last_doc:
+                return {"text": "No recorded expenses found.", "has_data": False, "detected_categories": []}
+            # build nice output and structured dict
+            dd = {
+                "text": f"Last expense: {last_doc.get('category', 'Unknown')} — PKR {float(last_doc.get('amount', 0))} for {last_doc.get('description', last_doc.get('title','no description'))}.",
+                "has_data": True,
+                "total": float(last_doc.get("amount", 0)),
+                "categories": { last_doc.get("category", "Unknown"): float(last_doc.get("amount", 0)) },
+                "detected_categories": [ last_doc.get("category", "Unknown") ]
+            }
+            return dd
+
+        # expense vs advice detection
+        expense_keywords = ["total", "spent", "expense", "summary", "report", "how much", "spending", "cost", "money", "this week", "last month", "today", "yesterday", "this month", "week", "month"]
+        advice_keywords = ["advice", "suggest", "tips", "how to save", "how can i save", "help me save", "recommend"]
+
+        if any(w in user_query.lower() for w in expense_keywords):
+            # query DB using query_filter (which might be {} meaning all data)
+            qf = query_filter if isinstance(query_filter, dict) else {}
+            docs = list(db.expenses.find(qf))
+            if not docs:
+                return {"text": "No expenses found in that period.", "has_data": False, "total": 0, "categories": {}, "detected_categories": detected_categories}
+
+            total = sum(float(d.get("amount", 0)) for d in docs)
+            categories = {}
+            for d in docs:
+                cat = d.get("category", "Other")
+                categories[cat] = categories.get(cat, 0) + float(d.get("amount", 0))
+
+            summary_text = f"Total spent: {total:.2f} PKR. Breakdown: " + ", ".join([f"{c}: {amt:.2f}" for c, amt in categories.items()])
+            return {"text": summary_text, "has_data": True, "total": total, "categories": categories, "detected_categories": detected_categories}
+
+        if any(w in user_query.lower() for w in advice_keywords):
+            # return marker telling main flow we need advice
+            # but provide structured recent-month summary to base advice on
+            # default to last 30 days
+            now = datetime.now()
+            start_30 = now - timedelta(days=30)
+            docs = list(db.expenses.find({"date": {"$gte": start_30, "$lte": now}}))
+            if not docs:
+                return {"text": "No recent expenses to analyze for advice.", "has_data": False, "total": 0, "categories": {}, "detected_categories": []}
+
+            total = sum(float(d.get("amount", 0)) for d in docs)
+            categories = {}
+            for d in docs:
+                cat = d.get("category", "Other")
+                categories[cat] = categories.get(cat, 0) + float(d.get("amount", 0))
+
+            return {"text": "advice_request", "has_data": True, "total": total, "categories": categories, "detected_categories": detected_categories}
+
+        # Non-expense / fallback: no structured data
+        return None
+
+    # run summarizer in executor
+    loop = asyncio.get_event_loop()
+    summary = await loop.run_in_executor(_executor, summarize_text_local, user_query)
+
+    # ---------- Build prompt / handle different types ----------
+    # If advice request, prefer rule-based advice to avoid model echoing instructions
+    if summary and summary.get("text") == "advice_request":
+        # use rule-based advice using structured data to guarantee useful output
+        reply = rule_based_advice(summary)
+        cache[cache_key] = {"text": reply, "has_data": True}
+        return {"response": reply, "cached": False, "has_expense_data": True}
+
+    # If we have a last-expense or summary dict, craft a compact instruction for the model
+    if summary:
+        # use the structured summary text but keep instruction minimal and explicit
+        model_prompt = (
+            f"USER QUERY: {user_query}\n\n"
+            f"DATA: {summary['text']}\n\n"
+            "INSTRUCTION: Answer the user's question concisely using the DATA above. "
+            "Do NOT repeat these instructions. Provide numbers where available.\n\n"
+            "RESPONSE:"
+        )
+    else:
+        # general chat fallback
+        model_prompt = (
+            f"USER QUERY: {user_query}\n\n"
+            "INSTRUCTION: Provide a short helpful answer. If you need expense data, ask the user to add it.\n\n"
+            "RESPONSE:"
+        )
+
+    # ---------- Call the model (flan-t5-base) ----------
+    try:
+        inputs = tokenizer(model_prompt, return_tensors="pt", truncation=True, padding=True)
+        with torch.no_grad():
+            outputs = model.generate(
+                **inputs,
+                max_new_tokens=160,
+                do_sample=False,     # deterministic
+                temperature=0.0,
+                early_stopping=True
+            )
+        reply = tokenizer.decode(outputs[0], skip_special_tokens=True).strip()
     except Exception as e:
-        print("❌ Error:", e)
-        return {"response": "⚠️ Something went wrong. Please try again later."}
+        reply = f"AI error: {e}"
+
+    # ---------- Post-check: detect instruction-echo or too-short output ----------
+    lower_reply = reply.lower()
+    # simple heuristic: if model echoed instruction text or is too short, fallback to rule-based
+    if len(reply) < 12 or "instruction" in lower_reply or "do not" in lower_reply or "do not repeat" in lower_reply or "if the user" in lower_reply:
+        # If we have structured data, create a short deterministic response
+        if summary and summary.get("has_data"):
+            # Build a short factual reply
+            total = summary.get("total", 0)
+            cats = summary.get("categories", {})
+            if total and cats:
+                top = max(cats.items(), key=lambda x: x[1])
+                reply = f"You spent {total:.2f} PKR. Top category: {top[0]} ({top[1]:.2f} PKR)."
+            elif total:
+                reply = f"You spent {total:.2f} PKR."
+            else:
+                reply = summary.get("text", "No expenses found.")
+        else:
+            reply = "I couldn't generate a good answer. Please try a shorter question or specify a date range (e.g., 'this month')."
+
+    # save to cache and return
+    cache[cache_key] = {"text": reply, "has_data": bool(summary and summary.get("has_data", False))}
+    return {
+        "response": reply,
+        "cached": False,
+        "has_expense_data": bool(summary and summary.get("has_data", False)),
+        "detected_categories": summary.get("detected_categories", []) if summary else []
+    }
+
 
     #  python -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload
