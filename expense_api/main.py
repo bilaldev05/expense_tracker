@@ -94,9 +94,7 @@ def get_cache_key(user_query: str):
 class ChatRequest(BaseModel):
     message: str
 
-# -----------------------------------------------------
-# 5️⃣ Expense Summary Generator
-# -----------------------------------------------------
+
 def summarize_expenses(query_filter):
     data = list(expenses.find(query_filter))
     if not data:
@@ -111,9 +109,7 @@ def summarize_expenses(query_filter):
     breakdown = ", ".join([f"{cat}: {amt}" for cat, amt in categories.items()])
     return f"Total spent: {total} PKR. Breakdown: {breakdown}"
 
-# -----------------------------------------------------
-# 6️⃣ Time Range Detector
-# -----------------------------------------------------
+
 def detect_date_range(user_query: str):
     """
     Detects the date range (start, end) based on the user's query.
