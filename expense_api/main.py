@@ -835,7 +835,7 @@ async def ai_chat(request: ChatRequest):
         if detected_categories:
             # preserve existing date filter possibly empty dict
             if isinstance(query_filter, dict):
-                query_filter = dict(query_filter)  # shallow copy
+                query_filter = dict(query_filter)  
             else:
                 query_filter = {}
             query_filter["category"] = {"$in": detected_categories}
