@@ -4,8 +4,7 @@ import 'package:path/path.dart';
 
 class UploadService {
   static Future<void> uploadBill(File imageFile) async {
-    final uri = Uri.parse(
-        "http://10.0.2.2:8000/upload-bill"); // Use local IP or 10.0.2.2 for Android emulator
+    final uri = Uri.parse("http://10.0.2.2:8000/upload-bill");
 
     final request = http.MultipartRequest('POST', uri);
 

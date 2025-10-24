@@ -18,7 +18,7 @@ def parse_expense_text(text: str):
     if match:
         amount = float(match.group(1))
 
-    # Extract named entities (like KFC, Burger)
+   
     for ent in doc.ents:
         if ent.label_ in ["ORG", "GPE", "PRODUCT"]:
             title = ent.text
