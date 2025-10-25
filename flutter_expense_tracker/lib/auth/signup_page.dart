@@ -254,7 +254,7 @@ class _SignUpPageState extends State<SignUpPage> {
                         ),
                         const SizedBox(height: 16),
 
-                        // Login Redirect
+                        
                         TextButton(
                           onPressed: () => Navigator.pushReplacement(
                             context,

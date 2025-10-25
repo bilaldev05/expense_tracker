@@ -4,6 +4,8 @@ import hashlib
 from unittest import result
 from fastapi import FastAPI, HTTPException, Request, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from pymongo import MongoClient
 from typing import List, Optional
@@ -52,9 +54,15 @@ from transformers import (
 )
 import random
 import calendar as cal
+from fastapi import HTTPException
+import io, base64, tempfile, traceback
+import matplotlib.pyplot as plt
+from gtts import gTTS
+from fastapi.responses import JSONResponse
 
 
 app = FastAPI()
+_executor = ThreadPoolExecutor(max_workers=2)
 
 
 logger = logging.getLogger(__name__)
@@ -73,125 +81,192 @@ tokenizer = AutoTokenizer.from_pretrained(model_name)
 model = AutoModelForSeq2SeqLM.from_pretrained(model_name, torch_dtype=torch.float16)
 model.eval()
 
-# -----------------------------------------------------
-# 2️⃣ Database Connection
-# -----------------------------------------------------
 client = MongoClient("mongodb://localhost:27017")
 db = client["expense_db"]
 expenses = db["expenses"]
 
 # -----------------------------------------------------
-# 3️⃣ Simple In-memory Cache
+# Cache
 # -----------------------------------------------------
 cache = {}
-
 def get_cache_key(user_query: str):
     return hashlib.md5(user_query.lower().encode()).hexdigest()
 
 # -----------------------------------------------------
-# 4️⃣ Request Schema
+# Request Schema
 # -----------------------------------------------------
 class ChatRequest(BaseModel):
     message: str
 
-
-def summarize_expenses(query_filter):
-    data = list(expenses.find(query_filter))
-    if not data:
-        return "No expenses found in that period."
-
-    total = sum(item["amount"] for item in data)
-    categories = {}
-    for item in data:
-        cat = item.get("category", "Other")
-        categories[cat] = categories.get(cat, 0) + item["amount"]
-
-    breakdown = ", ".join([f"{cat}: {amt}" for cat, amt in categories.items()])
-    return f"Total spent: {total} PKR. Breakdown: {breakdown}"
-
-
+# -----------------------------------------------------
+# Detect Date Range from User Query
+# -----------------------------------------------------
 def detect_date_range(user_query: str):
-    """
-    Detects the date range (start, end) based on the user's query.
-    Returns a MongoDB-style filter: {"date": {"$gte": start, "$lte": end}}
-    """
     now = datetime.now()
-    user_query = user_query.lower()
+    q = user_query.lower()
+    start, end = None, None
 
-    start_date, end_date = None, None
-
-    # --- Today ---
-    if "today" in user_query:
-        start_date = end_date = now
-
-    # --- Yesterday ---
-    elif "yesterday" in user_query:
-        start_date = end_date = now - timedelta(days=1)
-
-    # --- This Week ---
-    elif "this week" in user_query:
-        start_date = now - timedelta(days=now.weekday())  # Monday
-        end_date = now
-
-    # --- Last Week ---
-    elif "last week" in user_query:
+    if "today" in q:
+        start = end = now
+    elif "yesterday" in q:
+        start = end = now - timedelta(days=1)
+    elif "this week" in q:
+        start = now - timedelta(days=now.weekday())
+        end = now
+    elif "last week" in q:
         last_monday = now - timedelta(days=now.weekday() + 7)
-        start_date = last_monday
-        end_date = last_monday + timedelta(days=6)
-
-    # --- This Month ---
-    elif "this month" in user_query or "october" in user_query:  # Added direct month word matching
-        start_date = now.replace(day=1)
-        end_date = now
-
-    # --- Last Month ---
-    elif "last month" in user_query or "previous month" in user_query:
+        start = last_monday
+        end = last_monday + timedelta(days=6)
+    elif "this month" in q:
+        start = now.replace(day=1)
+        end = now
+    elif "last month" in q:
         first_day_this_month = now.replace(day=1)
         last_month_end = first_day_this_month - timedelta(days=1)
-        start_date = last_month_end.replace(day=1)
-        end_date = last_month_end
-
-    # --- This Year ---
-    elif "this year" in user_query:
-        start_date = datetime(now.year, 1, 1)
-        end_date = now
-
-    # --- Last Year ---
-    elif "last year" in user_query or "previous year" in user_query:
-        start_date = datetime(now.year - 1, 1, 1)
-        end_date = datetime(now.year - 1, 12, 31)
-
-    # --- Month Names (like "in September", "from March") ---
+        start = last_month_end.replace(day=1)
+        end = last_month_end
     else:
+        # Month name check
         months = [
             "january", "february", "march", "april", "may", "june",
             "july", "august", "september", "october", "november", "december"
         ]
-        for i, month in enumerate(months, start=1):
-            if month in user_query:
-                year = now.year
-                # If month is greater than current, assume previous year
-                if i > now.month:
-                    year -= 1
-                start_date = datetime(year, i, 1)
-                # Compute last day of month
+        for i, m in enumerate(months, start=1):
+            if m in q:
+                year = now.year if i <= now.month else now.year - 1
+                start = datetime(year, i, 1)
                 if i == 12:
-                    end_date = datetime(year, 12, 31)
+                    end = datetime(year, 12, 31)
                 else:
-                    end_date = datetime(year, i + 1, 1) - timedelta(days=1)
+                    end = datetime(year, i + 1, 1) - timedelta(days=1)
                 break
 
-    # --- Fallback: All Data ---
-    if not start_date or not end_date:
+    if not start or not end:
         return {}
 
-    # Format for MongoDB
-    return {
-        "date": {
-            "$gte": start_date.strftime("%Y-%m-%d"),
-            "$lte": end_date.strftime("%Y-%m-%d")
+    return {"date": {"$gte": start.strftime("%Y-%m-%d"), "$lte": end.strftime("%Y-%m-%d")}}
+
+# -----------------------------------------------------
+# Chart + Voice Generation Helpers
+# -----------------------------------------------------
+def generate_chart(categories: dict):
+    if not categories:
+        return None
+    fig, ax = plt.subplots(figsize=(4, 4))
+    ax.pie(categories.values(), labels=categories.keys(), autopct="%1.1f%%", startangle=90)
+    buf = io.BytesIO()
+    plt.savefig(buf, format="png", bbox_inches="tight")
+    buf.seek(0)
+    img_b64 = base64.b64encode(buf.read()).decode("utf-8")
+    plt.close(fig)
+    return img_b64
+
+def generate_voice_safe(text: str, filename: str):
+    """Generate and save MP3 voice file for Flutter playback."""
+    try:
+        os.makedirs("voices", exist_ok=True)
+        filepath = os.path.join("voices", f"{filename}.mp3")
+        tts = gTTS(text=text, lang="en", slow=False)
+        tts.save(filepath)
+        return f"/voices/{filename}.mp3"
+    except Exception as e:
+        print("❌ Voice generation failed:", e)
+        return None
+
+
+# -----------------------------------------------------
+# Summarize User Expense Data
+# -----------------------------------------------------
+def summarize_text_local(query: str):
+    query = query.lower()
+    query_filter = detect_date_range(query)
+
+    # Last expense
+    if any(k in query for k in ["last expense", "recent expense", "latest expense"]):
+        last_doc = expenses.find_one(sort=[("_id", -1)])
+        if not last_doc:
+            return {"text": "No recorded expenses found.", "has_data": False}
+        text = f"Your last expense was {last_doc.get('category', 'Unknown')} — PKR {last_doc.get('amount')} for {last_doc.get('description', 'no description')}."
+        return {"text": text, "has_data": True, "categories": {last_doc.get('category', 'Unknown'): float(last_doc.get('amount', 0))}}
+
+    # Date range expenses
+    docs = list(expenses.find(query_filter)) if query_filter else list(expenses.find())
+    if not docs:
+        return {"text": "No expenses found in that period.", "has_data": False}
+
+    total = sum(float(d.get("amount", 0)) for d in docs)
+    cats = {}
+    for d in docs:
+        cat = d.get("category", "Other")
+        cats[cat] = cats.get(cat, 0) + float(d.get("amount", 0))
+
+    breakdown = ", ".join([f"{c}: {amt:.2f}" for c, amt in cats.items()])
+    text = f"Total spent: {total:.2f} PKR. Breakdown: {breakdown}."
+    return {"text": text, "has_data": True, "categories": cats}
+
+os.makedirs("voices", exist_ok=True)
+
+# Mount the static directory
+app.mount("/voices", StaticFiles(directory="voices"), name="voices")
+
+# -----------------------------------------------------
+# Chat Endpoint (Main)
+# -----------------------------------------------------
+@app.post("/ai-chat")
+async def ai_chat(request: ChatRequest):
+    try:
+        user_query = request.message.strip()
+        cache_key = get_cache_key(user_query)
+
+        # --- Check Cache ---
+        if cache_key in cache:
+            return JSONResponse(content=cache[cache_key])
+
+        loop = asyncio.get_event_loop()
+        summary = await loop.run_in_executor(None, summarize_text_local, user_query)
+
+        # --- Create Natural Reply ---
+        if "no expenses" in summary["text"].lower():
+            reply = "I couldn’t find any recorded expenses for that period. Try checking another range."
+        else:
+            reply = f"Here’s your expense insight: {summary['text']} Keep tracking your spending wisely!"
+
+        # --- Voice + Chart ---
+        filename = f"voice_{abs(hash(user_query))}"
+        voice_url = generate_voice_safe(reply, filename)
+        chart_b64 = generate_chart(summary.get("categories", {})) if summary.get("has_data") else None
+
+        # --- Response Payload ---
+        result = {
+            "response": reply,
+            "voice_url": voice_url,          # ✅ Flutter will now use this
+            "chart_base64": chart_b64,
         }
-    }
+
+        cache[cache_key] = result
+        print(f"✅ Reply: {reply[:100]} | 🎙️ Voice: {'Yes' if voice_url else 'No'} | 📊 Chart: {'Yes' if chart_b64 else 'No'}")
+
+        return JSONResponse(content=result)
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return JSONResponse(
+            content={"response": f"Error: {str(e)}", "voice_url": None, "chart_base64": None},
+            status_code=500,
+        )
+
+
+# -----------------------------------------------------
+# Serve Audio (if needed)
+# -----------------------------------------------------
+@app.get("/audio/{filename}")
+async def get_audio(filename: str):
+    path = os.path.join("audio", filename)
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="Audio not found")
+    return FileResponse(path, media_type="audio/mpeg")
+
 # Upload directory
 UPLOAD_DIR = "uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
@@ -779,195 +854,7 @@ async def confirm_expense(data: dict):
 _executor = ThreadPoolExecutor(max_workers=1)
 
 
-@app.post("/ai-chat")
-async def ai_chat(request: ChatRequest):
-    """
-    Improved ai_chat:
-    - robust date & category detection
-    - safe prompts for flan-t5-base
-    - rule-based fallback for advice and short/echoed outputs
-    - handles "last expense" correctly
-    """
-    user_query = request.message.strip()
-    cache_key = get_cache_key(user_query)
 
-    # Return cached response if exists
-    if cache_key in cache:
-        return {"response": cache[cache_key]["text"], "cached": True}
-
-    # ---------- Helper: small rule-based advice generator ----------
-    def rule_based_advice(summary_dict):
-        total = summary_dict.get("total", 0)
-        cats = summary_dict.get("categories", {})
-        tips = []
-
-        # Tip 1: target largest category
-        if cats:
-            top_cat = max(cats.items(), key=lambda x: x[1])[0]
-            tips.append(f"You're spending most on *{top_cat}*. Try reducing that category by 10% next month.")
-        else:
-            tips.append("Start by tracking all purchases for a week so we can spot easy savings.")
-
-        # Tip 2: general spending rule
-        if total > 20000:
-            tips.append("Your total spending is high — set a weekly limit and review subscriptions.")
-        else:
-            tips.append("You're within a reasonable range — keep tracking and try a small weekly budget to save more.")
-
-        # Tip 3: simple habit
-        tips.append("Avoid impulse buys: wait 24 hours before non-essential purchases over 2,000 PKR.")
-
-        return " ".join(tips)
-
-    # ---------- Summarization logic (runs in executor to avoid blocking) ----------
-    def summarize_text_local(user_query: str):
-        # detect period & categories (uses your existing detect_date_range())
-        query_filter = detect_date_range(user_query)
-
-        # detect categories
-        categories_list = [
-            "food", "transport", "shopping", "groceries", "bills",
-            "entertainment", "health", "rent", "education", "travel", "utilities"
-        ]
-        detected_categories = [c for c in categories_list if c in user_query.lower()]
-
-        # build mongo filter for categories if needed
-        if detected_categories:
-            # preserve existing date filter possibly empty dict
-            if isinstance(query_filter, dict):
-                query_filter = dict(query_filter)  
-            else:
-                query_filter = {}
-            query_filter["category"] = {"$in": detected_categories}
-
-        # last-expense detection
-        if any(k in user_query.lower() for k in ["last expense", "recent expense", "latest expense", "what was my last expense"]):
-            last_doc = db.expenses.find_one(sort=[("_id", -1)])
-            if not last_doc:
-                return {"text": "No recorded expenses found.", "has_data": False, "detected_categories": []}
-            # build nice output and structured dict
-            dd = {
-                "text": f"Last expense: {last_doc.get('category', 'Unknown')} — PKR {float(last_doc.get('amount', 0))} for {last_doc.get('description', last_doc.get('title','no description'))}.",
-                "has_data": True,
-                "total": float(last_doc.get("amount", 0)),
-                "categories": { last_doc.get("category", "Unknown"): float(last_doc.get("amount", 0)) },
-                "detected_categories": [ last_doc.get("category", "Unknown") ]
-            }
-            return dd
-
-        # expense vs advice detection
-        expense_keywords = ["total", "spent", "expense", "summary", "report", "how much", "spending", "cost", "money", "this week", "last month", "today", "yesterday", "this month", "week", "month"]
-        advice_keywords = ["advice", "suggest", "tips", "how to save", "how can i save", "help me save", "recommend"]
-
-        if any(w in user_query.lower() for w in expense_keywords):
-            # query DB using query_filter (which might be {} meaning all data)
-            qf = query_filter if isinstance(query_filter, dict) else {}
-            docs = list(db.expenses.find(qf))
-            if not docs:
-                return {"text": "No expenses found in that period.", "has_data": False, "total": 0, "categories": {}, "detected_categories": detected_categories}
-
-            total = sum(float(d.get("amount", 0)) for d in docs)
-            categories = {}
-            for d in docs:
-                cat = d.get("category", "Other")
-                categories[cat] = categories.get(cat, 0) + float(d.get("amount", 0))
-
-            summary_text = f"Total spent: {total:.2f} PKR. Breakdown: " + ", ".join([f"{c}: {amt:.2f}" for c, amt in categories.items()])
-            return {"text": summary_text, "has_data": True, "total": total, "categories": categories, "detected_categories": detected_categories}
-
-        if any(w in user_query.lower() for w in advice_keywords):
-            # return marker telling main flow we need advice
-            # but provide structured recent-month summary to base advice on
-            # default to last 30 days
-            now = datetime.now()
-            start_30 = now - timedelta(days=30)
-            docs = list(db.expenses.find({"date": {"$gte": start_30, "$lte": now}}))
-            if not docs:
-                return {"text": "No recent expenses to analyze for advice.", "has_data": False, "total": 0, "categories": {}, "detected_categories": []}
-
-            total = sum(float(d.get("amount", 0)) for d in docs)
-            categories = {}
-            for d in docs:
-                cat = d.get("category", "Other")
-                categories[cat] = categories.get(cat, 0) + float(d.get("amount", 0))
-
-            return {"text": "advice_request", "has_data": True, "total": total, "categories": categories, "detected_categories": detected_categories}
-
-        # Non-expense / fallback: no structured data
-        return None
-
-    # run summarizer in executor
-    loop = asyncio.get_event_loop()
-    summary = await loop.run_in_executor(_executor, summarize_text_local, user_query)
-
-    # ---------- Build prompt / handle different types ----------
-    # If advice request, prefer rule-based advice to avoid model echoing instructions
-    if summary and summary.get("text") == "advice_request":
-        # use rule-based advice using structured data to guarantee useful output
-        reply = rule_based_advice(summary)
-        cache[cache_key] = {"text": reply, "has_data": True}
-        return {"response": reply, "cached": False, "has_expense_data": True}
-
-    # If we have a last-expense or summary dict, craft a compact instruction for the model
-    if summary:
-        # use the structured summary text but keep instruction minimal and explicit
-        model_prompt = (
-            f"USER QUERY: {user_query}\n\n"
-            f"DATA: {summary['text']}\n\n"
-            "INSTRUCTION: Answer the user's question concisely using the DATA above. "
-            "Do NOT repeat these instructions. Provide numbers where available.\n\n"
-            "RESPONSE:"
-        )
-    else:
-        # general chat fallback
-        model_prompt = (
-            f"USER QUERY: {user_query}\n\n"
-            "INSTRUCTION: Provide a short helpful answer. If you need expense data, ask the user to add it.\n\n"
-            "RESPONSE:"
-        )
-
-    # ---------- Call the model (flan-t5-base) ----------
-    try:
-        inputs = tokenizer(model_prompt, return_tensors="pt", truncation=True, padding=True)
-        with torch.no_grad():
-            outputs = model.generate(
-                **inputs,
-                max_new_tokens=160,
-                do_sample=False,     # deterministic
-                temperature=0.0,
-                early_stopping=True
-            )
-        reply = tokenizer.decode(outputs[0], skip_special_tokens=True).strip()
-    except Exception as e:
-        reply = f"AI error: {e}"
-
-    # ---------- Post-check: detect instruction-echo or too-short output ----------
-    lower_reply = reply.lower()
-    # simple heuristic: if model echoed instruction text or is too short, fallback to rule-based
-    if len(reply) < 12 or "instruction" in lower_reply or "do not" in lower_reply or "do not repeat" in lower_reply or "if the user" in lower_reply:
-        # If we have structured data, create a short deterministic response
-        if summary and summary.get("has_data"):
-            # Build a short factual reply
-            total = summary.get("total", 0)
-            cats = summary.get("categories", {})
-            if total and cats:
-                top = max(cats.items(), key=lambda x: x[1])
-                reply = f"You spent {total:.2f} PKR. Top category: {top[0]} ({top[1]:.2f} PKR)."
-            elif total:
-                reply = f"You spent {total:.2f} PKR."
-            else:
-                reply = summary.get("text", "No expenses found.")
-        else:
-            reply = "I couldn't generate a good answer. Please try a shorter question or specify a date range (e.g., 'this month')."
-
-    # save to cache and return
-    cache[cache_key] = {"text": reply, "has_data": bool(summary and summary.get("has_data", False))}
-    return {
-        "response": reply,
-        "cached": False,
-        "has_expense_data": bool(summary and summary.get("has_data", False)),
-        "detected_categories": summary.get("detected_categories", []) if summary else []
-    }
 
 
     #  python -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload

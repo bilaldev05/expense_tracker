@@ -1,6 +1,7 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
-import 'dart:convert';
+import 'package:audioplayers/audioplayers.dart';
 
 class FinanceChatScreen extends StatefulWidget {
   const FinanceChatScreen({super.key});
@@ -12,12 +13,13 @@ class FinanceChatScreen extends StatefulWidget {
 class _FinanceChatScreenState extends State<FinanceChatScreen> {
   final TextEditingController _controller = TextEditingController();
   final ScrollController _scrollController = ScrollController();
-  final List<Map<String, String>> _messages = [];
+  final AudioPlayer _audioPlayer = AudioPlayer();
+  final List<Map<String, dynamic>> _messages = [];
   bool _isTyping = false;
 
   // 🌐 Send message to FastAPI backend
-  Future<String> sendMessageToBackend(String message) async {
-    const String apiUrl = "http://localhost:8000/ai-chat"; // update if needed
+  Future<Map<String, dynamic>> sendMessageToBackend(String message) async {
+    const String apiUrl = "http://127.0.0.1:8000/ai-chat"; // ✅ use 127.0.0.1
 
     final response = await http.post(
       Uri.parse(apiUrl),
@@ -27,9 +29,13 @@ class _FinanceChatScreenState extends State<FinanceChatScreen> {
 
     if (response.statusCode == 200) {
       final data = jsonDecode(response.body);
-      return data["response"] ?? "No response received.";
+      return {
+        "response": data["response"] ?? "No response received.",
+        "voice_url": data["voice_url"],
+        "chart_base64": data["chart_base64"]
+      };
     } else {
-      return "Error: ${response.statusCode}";
+      return {"response": "Error: ${response.statusCode}"};
     }
   }
 
@@ -43,13 +49,25 @@ class _FinanceChatScreenState extends State<FinanceChatScreen> {
       _isTyping = true;
     });
 
-    final reply = await sendMessageToBackend(text);
+    final replyData = await sendMessageToBackend(text);
 
     setState(() {
-      _messages.add({'role': 'assistant', 'content': reply});
+      _messages.add({
+        'role': 'assistant',
+        'content': replyData["response"],
+        'voice_url': replyData["voice_url"],
+        'chart_base64': replyData["chart_base64"]
+      });
       _isTyping = false;
     });
 
+    // 🔊 Play voice if available
+    if (replyData["voice_url"] != null) {
+      final fullUrl = "http://127.0.0.1:8000${replyData["voice_url"]}";
+      await _audioPlayer.play(UrlSource(fullUrl));
+    }
+
+    // 🧭 Auto-scroll down
     Future.delayed(const Duration(milliseconds: 200), () {
       _scrollController.animateTo(
         _scrollController.position.maxScrollExtent + 80,
@@ -59,7 +77,11 @@ class _FinanceChatScreenState extends State<FinanceChatScreen> {
     });
   }
 
-  Widget _chatBubble(String text, bool isUser) {
+  Widget _chatBubble(Map<String, dynamic> msg) {
+    final isUser = msg['role'] == 'user';
+    final String text = msg['content'];
+    final String? chartBase64 = msg['chart_base64'];
+
     return Align(
       alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
       child: AnimatedContainer(
@@ -94,16 +116,41 @@ class _FinanceChatScreenState extends State<FinanceChatScreen> {
             )
           ],
         ),
-        child: Text(
-          text,
-          style: TextStyle(
-            color: isUser ? Colors.white : Colors.black87,
-            fontSize: 15.5,
-            height: 1.4,
-          ),
+        child: Column(
+          crossAxisAlignment:
+              isUser ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+          children: [
+            Text(
+              text,
+              style: TextStyle(
+                color: isUser ? Colors.white : Colors.black87,
+                fontSize: 15.5,
+                height: 1.4,
+              ),
+            ),
+            if (chartBase64 != null) ...[
+              const SizedBox(height: 10),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(10),
+                child: Image.memory(
+                  base64Decode(chartBase64),
+                  height: 180,
+                  fit: BoxFit.cover,
+                ),
+              ),
+            ],
+          ],
         ),
       ),
     );
+  }
+
+  @override
+  void dispose() {
+    _audioPlayer.dispose();
+    _controller.dispose();
+    _scrollController.dispose();
+    super.dispose();
   }
 
   @override
@@ -136,7 +183,7 @@ class _FinanceChatScreenState extends State<FinanceChatScreen> {
               itemCount: _messages.length,
               itemBuilder: (context, index) {
                 final msg = _messages[index];
-                return _chatBubble(msg['content']!, msg['role'] == 'user');
+                return _chatBubble(msg);
               },
             ),
           ),
