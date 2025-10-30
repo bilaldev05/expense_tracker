@@ -229,7 +229,7 @@ class _ChatExpenseScreenState extends State<ChatExpenseScreen> {
                 final msg = _messages[index];
                 final isUser = msg["sender"] == "user";
 
-                // 🔸 Confirmation message
+                
                 if (msg["type"] == "confirmation") {
                   return Align(
                     alignment: Alignment.centerLeft,
