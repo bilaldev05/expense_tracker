@@ -351,7 +351,7 @@ class _ChatExpenseScreenState extends State<ChatExpenseScreen> {
             ),
           ),
 
-          // 🔹 Input Bar
+         
           SafeArea(
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),

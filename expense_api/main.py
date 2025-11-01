@@ -857,4 +857,4 @@ _executor = ThreadPoolExecutor(max_workers=1)
 
 
 
-    #  python -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    #  py -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload
