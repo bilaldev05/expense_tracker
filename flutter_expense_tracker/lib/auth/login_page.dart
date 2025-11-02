@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../screens/expense_home_page.dart';
 import 'signup_page.dart';
 
@@ -14,19 +15,32 @@ class _LoginPageState extends State<LoginPage> {
   final _formKey = GlobalKey<FormState>();
   bool _isLoading = false;
 
+  Future<void> _saveUserId(String userId) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('userId', userId);
+  }
+
   Future<void> _login() async {
     if (_formKey.currentState!.validate()) {
       setState(() => _isLoading = true);
       try {
-        await FirebaseAuth.instance.signInWithEmailAndPassword(
+        // ✅ Firebase Login
+        final credential = await FirebaseAuth.instance.signInWithEmailAndPassword(
           email: _emailController.text.trim(),
           password: _passwordController.text,
         );
 
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (_) => ExpenseHomePage()),
-        );
+        final user = credential.user;
+        if (user != null) {
+          // ✅ Save user ID locally
+          await _saveUserId(user.uid);
+
+          // ✅ Navigate to main expense home
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (_) => const ExpenseHomePage()),
+          );
+        }
       } catch (e) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -95,7 +109,7 @@ class _LoginPageState extends State<LoginPage> {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                // Logo / App name section
+                // 🔹 Logo section
                 Container(
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
@@ -128,7 +142,7 @@ class _LoginPageState extends State<LoginPage> {
                 ),
                 const SizedBox(height: 40),
 
-                // Login form container
+                // 🔹 Form Container
                 Container(
                   width: double.infinity,
                   padding:
@@ -167,6 +181,7 @@ class _LoginPageState extends State<LoginPage> {
                         ),
                         const SizedBox(height: 28),
 
+                        // 🔹 Login button
                         SizedBox(
                           width: double.infinity,
                           child: ElevatedButton(
@@ -200,7 +215,7 @@ class _LoginPageState extends State<LoginPage> {
                         ),
                         const SizedBox(height: 24),
 
-                        // OR divider
+                        // Divider
                         Row(
                           children: [
                             Expanded(
@@ -224,7 +239,7 @@ class _LoginPageState extends State<LoginPage> {
                         ),
                         const SizedBox(height: 16),
 
-                        // Sign up redirect
+                        // 🔹 Sign up
                         TextButton(
                           onPressed: () => Navigator.pushReplacement(
                             context,

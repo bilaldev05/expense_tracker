@@ -5,7 +5,7 @@ import 'dart:html' as html;
 
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:flutter_expense_tracker/screens/finance_chat_screen.dart';
+import 'package:flutter_expense_tracker/widgets/home_appbar.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 
@@ -17,6 +17,7 @@ import 'package:flutter_expense_tracker/auth/login_page.dart';
 import 'package:flutter_expense_tracker/services/api_service.dart';
 import 'package:flutter_expense_tracker/services/notification_service.dart';
 import '../models/expense.dart';
+
 
 class ExpenseHomePage extends StatefulWidget {
   const ExpenseHomePage({Key? key}) : super(key: key);
@@ -40,6 +41,7 @@ class _ExpenseHomePageState extends State<ExpenseHomePage> {
   String _selectedCategory = 'Other';
   int _selectedIndex = 0;
   double _dailyLimit = 0.0;
+  
 
   final Map<String, IconData> categoryIcons = {
     'Food': Icons.fastfood,
@@ -48,6 +50,11 @@ class _ExpenseHomePageState extends State<ExpenseHomePage> {
     'Bills': Icons.receipt_long,
     'Other': Icons.category_outlined,
   };
+
+  bool isFamilyMode = false;
+  
+
+
 
   @override
   void initState() {
@@ -1057,40 +1064,15 @@ class _ExpenseHomePageState extends State<ExpenseHomePage> {
       const SummaryPage(),
 
       // Graph
-      GraphPage(),
+      const GraphPage(),
     ];
 
     return Scaffold(
       backgroundColor: Colors.grey.shade100,
-      appBar: _selectedIndex == 0
-          ? AppBar(
-              backgroundColor: Colors.white,
-              elevation: 1,
-              centerTitle: true,
-              title: Row(mainAxisSize: MainAxisSize.min, children: const [
-                Icon(Icons.home, color: Colors.blueAccent),
-                SizedBox(width: 8),
-                Text("Home", style: TextStyle(color: Colors.black87)),
-              ]),
-              actions: [
-                IconButton(
-                  onPressed: _logout,
-                  icon: const Icon(Icons.logout, color: Colors.black54),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.chat_bubble_outline,
-                      color: Colors.blueAccent),
-                  onPressed: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                          builder: (_) => const FinanceChatScreen()),
-                    );
-                  },
-                ),
-              ],
-            )
-          : null,
+      appBar: HomeAppBar(onLogout: _logout),
+
+
+          
       body: _pages[_selectedIndex],
       floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
       floatingActionButton: FloatingActionButton(

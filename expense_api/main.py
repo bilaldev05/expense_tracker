@@ -1,8 +1,9 @@
 import asyncio
 from calendar import calendar
 import hashlib
+import string
 from unittest import result
-from fastapi import FastAPI, HTTPException, Request, UploadFile, File
+from fastapi import FastAPI, HTTPException, Request, UploadFile, File, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -74,6 +75,12 @@ db = client["expense_db"]
 collection = db["expenses"]
 budget_collection = db["budget"]
 bills_collection = db["bills"]
+db = client["family_budget_db"]
+
+users = db["users"]
+families = db["families"]
+expenses = db["expenses"]
+invites = db["family_invites"]
 
 openai.api_key = os.getenv("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")
 model_name = "google/flan-t5-base"
@@ -319,46 +326,67 @@ class Expense(ExpenseInput):
 class ChatRequest(BaseModel):
     message: str    
 
+cfamilies: Dict[str, Dict] = {}
+expenses: List[Dict] = []
+
+# ---------- Models ----------
+
+class FamilyCreate(BaseModel):
+    family_name: str
+    total_budget: float
+    user_id: str
 
 
+class JoinFamily(BaseModel):
+    family_id: str
+    user_id: str
 
-class SpendingData(BaseModel):
-    month: str  # e.g., "2025-10"
-    total_amount: float
-    by_category: Dict[str, float]
 
-@app.post("/ai-recommendations", response_model=List[str])
-async def ai_recommendations(spending: SpendingData):
-    """
-    Generate AI-based recommendations based on monthly spending.
-    """
-    # Prepare the prompt for AI
-    prompt = f"""
-    You are a financial assistant. Here is the user's monthly spending data:
-    Month: {spending.month}
-    Total Spending: Rs. {spending.total_amount}
-    Breakdown by category:
-    {chr(10).join([f"{cat}: Rs. {amt}" for cat, amt in spending.by_category.items()])}
+class AddExpense(BaseModel):
+    family_id: str
+    user_id: str
+    title: str
+    amount: float
 
-    Provide 3-5 actionable recommendations for the user to optimize their spending, 
-    reduce unnecessary expenses, and save more money. Return each recommendation as a short string.
-    """
+# -----------------------------
+# Utility Functions
+# -----------------------------
+def generate_invite_code():
+    """Generate a short unique invite code like 'AXP49D'"""
+    return ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
 
-    try:
-        response = openai.ChatCompletion.create(
-           model="gpt-3.5-turbo", 
+def get_family(family_id):
+    return families.find_one({"_id": ObjectId(family_id)})
 
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.7,
-            max_tokens=200,
-        )
-        # Extract recommendations
-        text = response.choices[0].message.content.strip()
-        # Split by newlines or numbered list
-        recommendations = [line.strip("-–0123456789. ").strip() for line in text.split("\n") if line.strip()]
-        return recommendations[:5]  # limit to 5 recommendations
-    except Exception as e:
-        return [f"Error generating recommendations: {str(e)}"]
+def get_user(family_id, name):
+    return users.find_one({"family_id": family_id, "name": name})
+
+# -----------------------------
+# WebSocket Connection Manager
+# -----------------------------
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: dict[str, list[WebSocket]] = {}
+
+    async def connect(self, family_id: str, websocket: WebSocket):
+        await websocket.accept()
+        if family_id not in self.active_connections:
+            self.active_connections[family_id] = []
+        self.active_connections[family_id].append(websocket)
+
+    def disconnect(self, family_id: str, websocket: WebSocket):
+        if family_id in self.active_connections:
+            self.active_connections[family_id].remove(websocket)
+
+    async def send_to_family(self, family_id: str, message: str):
+        """Send message to all connected users of that family"""
+        if family_id in self.active_connections:
+            for connection in self.active_connections[family_id]:
+                await connection.send_text(message)
+
+manager = ConnectionManager()
+
+
 # Expense Endpoints
 @app.post("/expenses")
 def add_expense(expense: ExpenseInput):
@@ -852,8 +880,98 @@ async def confirm_expense(data: dict):
 
 # ThreadPoolExecutor for running blocking generation
 _executor = ThreadPoolExecutor(max_workers=1)
+@app.post("/create_family_budget")
+def create_family_budget(data: FamilyCreate):
+    count = families.count_documents({})
+    family_id = f"fam_{count + 1}"
+
+    family_doc = {
+        "_id": family_id,
+        "family_name": data.family_name,
+        "total_budget": data.total_budget,
+        "remaining_budget": data.total_budget,
+        "members": [data.user_id],
+        "expenses": [],
+    }
+
+    families.insert_one(family_doc)
+    return {"message": "Family created successfully", "family_id": family_id}
+
+@app.post("/join_family")
+def join_family(data: JoinFamily):
+    """Join an existing family"""
+    family = families.get(data.family_id)
+    if not family:
+        raise HTTPException(status_code=404, detail="Family not found")
+
+    # Avoid duplicate members
+    if any(m["user_id"] == data.user_id for m in family["members"]):
+        raise HTTPException(status_code=400, detail="User already in family")
+
+    family["members"].append(
+        {"user_id": data.user_id, "name": f"User {data.user_id}", "spent": 0}
+    )
+
+    return {"message": "Joined family successfully", "family_id": data.family_id}
 
 
+@app.post("/add_expense")
+def add_expense(data: AddExpense):
+    """Add an expense for a user in a family"""
+    family = families.get(data.family_id)
+    if not family:
+        raise HTTPException(status_code=404, detail="Family not found")
+
+    expense = {
+        "user_id": data.user_id,
+        "title": data.title,
+        "amount": data.amount,
+        "user_name": f"User {data.user_id}",
+    }
+    family["expenses"].append(expense)
+    family["remaining_budget"] -= data.amount
+
+    # Update member’s spent value
+    for member in family["members"]:
+        if member["user_id"] == data.user_id:
+            member["spent"] += data.amount
+
+    return {"message": "Expense added successfully"}
+
+
+@app.get("/get_family_dashboard")
+def get_family_dashboard(family_id: str):
+    family = families.find_one({"_id": family_id})
+    if not family:
+        raise HTTPException(status_code=404, detail="Family not found")
+
+    # Convert ObjectId if needed
+    family["_id"] = str(family["_id"])
+
+    return {
+        "family_name": family["family_name"],
+        "total_budget": family["total_budget"],
+        "remaining_budget": family["remaining_budget"],
+        "members": family["members"],
+        "expenses": family["expenses"],
+    }
+
+
+
+@app.post("/family/leave")
+def leave_family(data: dict):
+    user_id = data.get("user_id")
+    user = users.find_one({"_id": user_id})
+
+    if not user or not user.get("family_id"):
+        raise HTTPException(status_code=400, detail="User not in a family")
+
+    family_id = user["family_id"]
+
+    families.update_one({"_id": family_id}, {"$pull": {"members": user_id}})
+    users.update_one({"_id": user_id}, {"$unset": {"family_id": "", "role_in_family": ""}})
+
+    return {"message": "Left family successfully"}
 
 
 

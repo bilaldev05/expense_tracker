@@ -280,4 +280,70 @@ AI Summary for $month:
           'Failed to load AI recommendations: ${response.statusCode}');
     }
   }
+   Future<Map<String, dynamic>> createFamily(String name, double totalBudget, String userId) async {
+    final response = await http.post(
+      Uri.parse('$baseUrl/create_family_budget'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        "family_name": name,
+        "total_budget": totalBudget,
+        "user_id": userId,
+      }),
+    );
+
+    if (response.statusCode == 200) {
+      return jsonDecode(response.body);
+    } else {
+      throw Exception('Failed to create family');
+    }
+  }
+
+  // Join Family
+   Future<Map<String, dynamic>> joinFamily(String familyId, String userId) async {
+    final response = await http.post(
+      Uri.parse('$baseUrl/join_family'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        "family_id": familyId,
+        "user_id": userId,
+      }),
+    );
+
+    if (response.statusCode == 200) {
+      return jsonDecode(response.body);
+    } else {
+      throw Exception('Failed to join family');
+    }
+  }
+
+  // Add Expense
+   Future<Map<String, dynamic>> addfamilyExpense(String familyId, String userId, String title, double amount) async {
+    final response = await http.post(
+      Uri.parse('$baseUrl/add_expense'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        "family_id": familyId,
+        "user_id": userId,
+        "title": title,
+        "amount": amount,
+      }),
+    );
+
+    if (response.statusCode == 200) {
+      return jsonDecode(response.body);
+    } else {
+      throw Exception('Failed to add expense');
+    }
+  }
+
+  // Get Family Dashboard
+   Future<Map<String, dynamic>> getFamilyDashboard(String familyId) async {
+    final response = await http.get(Uri.parse('$baseUrl/get_family_dashboard?family_id=$familyId'));
+    if (response.statusCode == 200) {
+      return jsonDecode(response.body);
+    } else {
+      throw Exception('Failed to fetch family dashboard');
+    }
+  }
+
 }
