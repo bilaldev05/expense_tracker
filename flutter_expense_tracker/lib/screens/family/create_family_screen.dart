@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_expense_tracker/screens/family/family_dashboard_screen.dart';
 import 'package:flutter_expense_tracker/services/api_service.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class CreateFamilyScreen extends StatefulWidget {
   final String userId;
@@ -41,16 +42,22 @@ class _CreateFamilyScreenState extends State<CreateFamilyScreen> {
         return;
       }
 
-      // ✅ Navigate with the new family ID and user ID
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(
-          builder: (_) => FamilyDashboardScreen(
-            familyId: familyId.toString(),
-            userId: widget.userId,
+      // ✅ Save family ID locally for quick access later
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString("family_id", familyId.toString());
+
+      // ✅ Navigate to Family Dashboard
+      if (mounted) {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (_) => FamilyDashboardScreen(
+              familyId: familyId.toString(),
+              userId: widget.userId,
+            ),
           ),
-        ),
-      );
+        );
+      }
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text("Error: $e")),

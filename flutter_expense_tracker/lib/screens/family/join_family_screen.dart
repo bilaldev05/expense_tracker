@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
-import '../../services/api_service.dart';
-import 'family_dashboard_screen.dart';
+import 'package:flutter_expense_tracker/services/api_service.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class JoinFamilyScreen extends StatefulWidget {
   final String userId;
+
   const JoinFamilyScreen({super.key, required this.userId});
 
   @override
@@ -11,34 +12,53 @@ class JoinFamilyScreen extends StatefulWidget {
 }
 
 class _JoinFamilyScreenState extends State<JoinFamilyScreen> {
-  final _formKey = GlobalKey<FormState>();
-  final _codeController = TextEditingController();
-  bool isLoading = false;
+  final TextEditingController _inviteCodeController = TextEditingController();
+  bool _loading = false;
 
   Future<void> _joinFamily() async {
-    if (!_formKey.currentState!.validate()) return;
+    final inviteCode = _inviteCodeController.text.trim();
+    if (inviteCode.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Please enter an invite code")),
+      );
+      return;
+    }
 
-    setState(() => isLoading = true);
+    setState(() => _loading = true);
+
     try {
       final api = ApiService();
-      final result =
-          await api.joinFamily(_codeController.text.trim(), widget.userId);
-      if (mounted) {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(
-            builder: (_) => FamilyDashboardScreen(
-              familyId: result['family_id'],
-              userId: widget.userId,
-            ),
-          ),
+      final response = await api.joinFamily(inviteCode, widget.userId);
+
+      if (response['family_id'] != null) {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString("family_id", response['family_id']);
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Successfully joined family!")),
+        );
+
+        if (mounted) {
+          Navigator.pushReplacementNamed(
+            context,
+            '/familyDashboard',
+            arguments: {
+              'familyId': response['family_id'],
+              'userId': widget.userId,
+            },
+          );
+        }
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Invalid invite code")),
         );
       }
     } catch (e) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('Error: $e')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Error joining family: $e")),
+      );
     } finally {
-      setState(() => isLoading = false);
+      setState(() => _loading = false);
     }
   }
 
@@ -46,74 +66,52 @@ class _JoinFamilyScreenState extends State<JoinFamilyScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Join Family'),
-        centerTitle: true,
-        backgroundColor: Colors.blue.shade600,
+        title: const Text("Join Family"),
       ),
-      body: Container(
-        width: double.infinity,
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            colors: [Color(0xFFB3E5FC), Color(0xFF81D4FA)],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-          ),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.all(24.0),
-          child: Card(
-            shape:
-                RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-            elevation: 8,
-            child: Padding(
-              padding: const EdgeInsets.all(24.0),
-              child: Form(
-                key: _formKey,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Text(
-                      "Join Existing Family",
-                      style:
-                          TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
-                    ),
-                    const SizedBox(height: 24),
-                    TextFormField(
-                      controller: _codeController,
-                      decoration: const InputDecoration(
-                        labelText: 'Family ID / Code',
-                        prefixIcon: Icon(Icons.vpn_key_outlined),
-                        border: OutlineInputBorder(),
-                      ),
-                      validator: (val) =>
-                          val!.isEmpty ? 'Enter a family code' : null,
-                    ),
-                    const SizedBox(height: 28),
-                    isLoading
-                        ? const CircularProgressIndicator()
-                        : ElevatedButton.icon(
-                            onPressed: _joinFamily,
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.blue.shade600,
-                              foregroundColor: Colors.white,
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 32, vertical: 14),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(16),
-                              ),
-                            ),
-                            icon: const Icon(Icons.group_add_outlined),
-                            label: const Text(
-                              'Join Family',
-                              style: TextStyle(
-                                  fontSize: 16, fontWeight: FontWeight.w600),
-                            ),
-                          ),
-                  ],
+      body: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            const SizedBox(height: 40),
+            const Text(
+              "Enter Family Invite Code",
+              style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: _inviteCodeController,
+              decoration: InputDecoration(
+                labelText: "Invite Code",
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
                 ),
               ),
             ),
-          ),
+            const SizedBox(height: 20),
+            ElevatedButton.icon(
+              icon: const Icon(Icons.group_add),
+              label: _loading
+                  ? const SizedBox(
+                      height: 20,
+                      width: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                    )
+                  : const Text("Join Family"),
+              onPressed: _loading ? null : _joinFamily,
+              style: ElevatedButton.styleFrom(
+                minimumSize: const Size(double.infinity, 50),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+            ),
+            const SizedBox(height: 40),
+            const Divider(),
+            const SizedBox(height: 10),
+            const Text(
+              "Don’t have a family? You can create one from your Family Dashboard.",
+              textAlign: TextAlign.center,
+            ),
+          ],
         ),
       ),
     );

@@ -1,13 +1,12 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_expense_tracker/auth/login_page.dart';
-import 'package:flutter_expense_tracker/widgets/home_appbar.dart';
-import 'package:flutter_expense_tracker/screens/family/join_family_screen.dart';
-import 'package:flutter_expense_tracker/screens/family/create_family_screen.dart';
-import '../../services/api_service.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_expense_tracker/services/api_service.dart';
+import 'package:share_plus/share_plus.dart';
+
 import 'package:shared_preferences/shared_preferences.dart';
 
 class FamilyDashboardScreen extends StatefulWidget {
-  final String? familyId;
+  final String familyId;
   final String userId;
 
   const FamilyDashboardScreen({
@@ -21,170 +20,252 @@ class FamilyDashboardScreen extends StatefulWidget {
 }
 
 class _FamilyDashboardScreenState extends State<FamilyDashboardScreen> {
+  final ApiService api = ApiService();
   Map<String, dynamic>? familyData;
-  bool isLoading = true;
-  int _selectedIndex = 0;
-  String? currentFamilyId;
+  bool _loading = true;
+  bool _isAdmin = false;
 
   @override
   void initState() {
     super.initState();
-    currentFamilyId = widget.familyId;
     _loadFamilyData();
   }
 
   Future<void> _loadFamilyData() async {
-    if (currentFamilyId == null || currentFamilyId!.isEmpty) {
-      setState(() {
-        isLoading = false;
-        familyData = null;
-      });
-      return;
-    }
-
     try {
-      final api = ApiService();
-      final data = await api.getFamilyDashboard(currentFamilyId!);
+      final data = await api.getFamilyDashboard(widget.familyId);
+      final prefs = await SharedPreferences.getInstance();
+
+      // Check if user is admin
+      _isAdmin = data['members'].isNotEmpty && data['members'][0] == widget.userId;
+
       setState(() {
         familyData = data;
-        isLoading = false;
+        _loading = false;
       });
+
+      await prefs.setString('family_id', widget.familyId);
     } catch (e) {
-      setState(() => isLoading = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error loading family data: $e')),
-      );
+      setState(() => _loading = false);
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Error loading dashboard: $e')));
     }
   }
 
-  /// 🧭 Logout
-  Future<void> _logout() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.clear();
+  Future<void> _inviteMember() async {
+    final inviteCode = familyData?['invite_code'] ?? 'ABC123';
+    final inviteLink =
+        'https://nikahplus-familyapp.com/join?family=$inviteCode';
 
-    if (mounted) {
-      Navigator.pushAndRemoveUntil(
-        context,
-        MaterialPageRoute(builder: (_) =>  LoginPage()),
-        (route) => false,
-      );
-    }
-  }
-
-  /// 🧩 Dashboard UI
-  Widget _buildFamilyDashboard() {
-    final members = (familyData?['members'] as List?) ?? [];
-    final expenses = (familyData?['expenses'] as List?) ?? [];
-
-    return Padding(
-      padding: const EdgeInsets.all(16.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            "👨‍👩‍👧 Family: ${familyData!['family_name'] ?? 'Unnamed Family'}",
-            style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-          ),
-          Text("💳 Family ID: ${currentFamilyId ?? 'N/A'}"),
-          Text("💰 Total Budget: Rs. ${familyData!['total_budget'] ?? 0}"),
-          Text("💸 Remaining: Rs. ${familyData!['remaining_budget'] ?? 0}"),
-          const SizedBox(height: 16),
-          const Text(
-            "Members:",
-            style: TextStyle(fontWeight: FontWeight.bold),
-          ),
-          ...members.map((m) {
-            final name = m is Map ? m['name'] ?? 'Unknown' : m.toString();
-            return ListTile(
-              leading: const Icon(Icons.person, color: Colors.blueAccent),
-              title: Text(name),
-            );
-          }),
-          const Divider(),
-          const Text(
-            "Recent Expenses:",
-            style: TextStyle(fontWeight: FontWeight.bold),
-          ),
-          Expanded(
-            child: expenses.isEmpty
-                ? const Center(child: Text("No expenses yet"))
-                : ListView.builder(
-                    itemCount: expenses.length,
-                    itemBuilder: (context, i) {
-                      final exp = expenses[i];
-                      final title = exp is Map ? exp['title'] ?? 'Unnamed' : exp.toString();
-                      final amount = exp is Map ? exp['amount'] ?? 0 : 0;
-                      return ListTile(
-                        leading: const Icon(Icons.money, color: Colors.green),
-                        title: Text(title.toString()),
-                        trailing: Text("Rs. $amount"),
+    await showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (_) => Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              "Invite Family Members",
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 12),
+            Text("Share this code or link to let others join your family."),
+            const SizedBox(height: 20),
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: Colors.grey.shade100,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.grey.shade300),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(inviteCode, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                  IconButton(
+                    icon: const Icon(Icons.copy),
+                    onPressed: () {
+                      Clipboard.setData(ClipboardData(text: inviteCode));
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text("Invite code copied")),
                       );
                     },
-                  ),
-          ),
+                  )
+                ],
+              ),
+            ),
+            const SizedBox(height: 10),
+            ElevatedButton.icon(
+              onPressed: () => Share.share('Join my family on Nikah Plus: $inviteLink'),
+              icon: const Icon(Icons.share),
+              label: const Text("Share Invite Link"),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _deleteMember(String memberId) async {
+    if (!_isAdmin) return;
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text("Remove Member"),
+        content: const Text("Are you sure you want to remove this member?"),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text("Cancel")),
+          ElevatedButton(onPressed: () => Navigator.pop(context, true), child: const Text("Remove")),
         ],
       ),
     );
+
+    if (confirm == true) {
+      try {
+        await api.removeMember(widget.familyId, memberId);
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Member removed")));
+        _loadFamilyData();
+      } catch (e) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: $e")));
+      }
+    }
   }
 
-  /// 🔁 Bottom nav
-  Future<void> _onItemTapped(int index) async {
-    setState(() => _selectedIndex = index);
-
-    final result = await Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => index == 0
-            ? JoinFamilyScreen(userId: widget.userId)
-            : CreateFamilyScreen(userId: widget.userId),
+  Future<void> _leaveFamily() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text("Leave Family"),
+        content: const Text("Are you sure you want to leave this family?"),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text("Cancel")),
+          ElevatedButton(onPressed: () => Navigator.pop(context, true), child: const Text("Leave")),
+        ],
       ),
     );
 
-    if (result != null && result is Map && result['family_id'] != null) {
-      setState(() {
-        currentFamilyId = result['family_id'];
-        isLoading = true;
-      });
-      await _loadFamilyData();
+    if (confirm == true) {
+      try {
+        await api.leaveFamily(widget.userId);
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.remove('family_id');
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("You left the family")));
+          Navigator.pushReplacementNamed(context, '/home');
+        }
+      } catch (e) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error leaving family: $e")));
+      }
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final hasFamily =
-        currentFamilyId != null && currentFamilyId!.isNotEmpty && familyData != null;
+    if (_loading) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+
+    if (familyData == null) {
+      return const Scaffold(
+        body: Center(child: Text("No family data found")),
+      );
+    }
+
+    final members = List<Map<String, dynamic>>.from(familyData?['members'] ?? []);
+    final expenses = List<Map<String, dynamic>>.from(familyData?['expenses'] ?? []);
+    final totalBudget = familyData?['total_budget'] ?? 0.0;
+    final remaining = familyData?['remaining_budget'] ?? 0.0;
 
     return Scaffold(
-      appBar: HomeAppBar(onLogout: _logout),
-      body: isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : hasFamily
-              ? _buildFamilyDashboard()
-              : const Center(
-                  child: Text(
-                    "No family linked yet.\nYou can Join or Create one below.",
-                    textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: 16),
+      appBar: AppBar(
+        title: Text(familyData?['family_name'] ?? "Family Dashboard"),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.person_add_alt_1),
+            onPressed: _inviteMember,
+            tooltip: "Invite Member",
+          ),
+          if (!_isAdmin)
+            IconButton(
+              icon: const Icon(Icons.exit_to_app),
+              tooltip: "Leave Family",
+              onPressed: _leaveFamily,
+            ),
+        ],
+      ),
+      body: RefreshIndicator(
+        onRefresh: _loadFamilyData,
+        child: SingleChildScrollView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            children: [
+              // ---- Budget Summary ----
+              Card(
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+                elevation: 2,
+                child: Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: Column(
+                    children: [
+                      const Text("Budget Overview", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                      const SizedBox(height: 10),
+                      Text("Total Budget: \$${totalBudget.toStringAsFixed(2)}"),
+                      Text("Remaining: \$${remaining.toStringAsFixed(2)}"),
+                      const SizedBox(height: 10),
+                      LinearProgressIndicator(
+                        value: remaining / totalBudget,
+                        backgroundColor: Colors.grey.shade300,
+                        color: Colors.green,
+                      ),
+                    ],
                   ),
                 ),
-      bottomNavigationBar: hasFamily
-          ? null
-          : BottomNavigationBar(
-              currentIndex: _selectedIndex,
-              onTap: _onItemTapped,
-              selectedItemColor: Colors.blueAccent,
-              unselectedItemColor: Colors.grey,
-              items: const [
-                BottomNavigationBarItem(
-                  icon: Icon(Icons.group_add),
-                  label: "Join Family",
-                ),
-                BottomNavigationBarItem(
-                  icon: Icon(Icons.family_restroom),
-                  label: "Create Family",
-                ),
-              ],
-            ),
+              ),
+
+              const SizedBox(height: 20),
+              // ---- Members ----
+              _sectionTitle("Family Members (${members.length})"),
+              ...members.map((m) => ListTile(
+                    leading: const CircleAvatar(child: Icon(Icons.person)),
+                    title: Text(m["name"] ?? "Unnamed"),
+                    subtitle: Text("Spent: \$${m["spent"] ?? 0}"),
+                    trailing: _isAdmin && m["user_id"] != widget.userId
+                        ? IconButton(
+                            icon: const Icon(Icons.delete, color: Colors.red),
+                            onPressed: () => _deleteMember(m["user_id"]),
+                          )
+                        : null,
+                  )),
+
+              const SizedBox(height: 20),
+              // ---- Expenses ----
+              _sectionTitle("Recent Expenses (${expenses.length})"),
+              ...expenses.map((e) => ListTile(
+                    leading: const Icon(Icons.receipt_long, color: Colors.teal),
+                    title: Text(e["title"]),
+                    subtitle: Text("By ${e["user_name"]}"),
+                    trailing: Text("- \$${e["amount"]}"),
+                  )),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _sectionTitle(String title) {
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6),
+        child: Text(title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+      ),
     );
   }
 }

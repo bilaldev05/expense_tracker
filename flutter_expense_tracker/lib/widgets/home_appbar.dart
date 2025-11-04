@@ -1,121 +1,66 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_expense_tracker/screens/finance_chat_screen.dart';
-import 'package:flutter_expense_tracker/screens/expense_home_page.dart';
 import 'package:flutter_expense_tracker/screens/family/family_dashboard_screen.dart';
-import 'package:flutter_expense_tracker/utils/shared_preferences.dart';
+import 'package:flutter_expense_tracker/screens/family/create_family_screen.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
-
-class HomeAppBar extends StatefulWidget implements PreferredSizeWidget {
+class HomeAppBar extends StatelessWidget implements PreferredSizeWidget {
   final VoidCallback onLogout;
 
   const HomeAppBar({super.key, required this.onLogout});
 
-  @override
-  State<HomeAppBar> createState() => _HomeAppBarState();
+  Future<void> _openFamilyDashboard(BuildContext context) async {
+    final prefs = await SharedPreferences.getInstance();
+    final userId = prefs.getString("user_id");
+    final familyId = prefs.getString("family_id");
 
-  @override
-  Size get preferredSize => const Size.fromHeight(kToolbarHeight);
-}
+    if (userId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Please log in first")),
+      );
+      return;
+    }
 
-class _HomeAppBarState extends State<HomeAppBar> {
-  bool isFamilyMode = false;
-
-  Future<void> _logout() async {
-    await SharedPrefsHelper.clearAll();
-    Navigator.pushReplacementNamed(context, '/login');
+    if (familyId != null && familyId.isNotEmpty) {
+      // ✅ If user already has a family → open Family Dashboard
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => FamilyDashboardScreen(
+            familyId: familyId,
+            userId: userId,
+          ),
+        ),
+      );
+    } else {
+      // 🆕 No family yet → Create new one
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => CreateFamilyScreen(userId: userId),
+        ),
+      );
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return AppBar(
-      backgroundColor: Colors.white,
-      elevation: 2,
-      centerTitle: true,
-      title: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Icon(Icons.family_restroom, color: Colors.blueAccent),
-          const SizedBox(width: 8),
-          Text(
-            isFamilyMode ? "Family Home" : "My Home",
-            style: const TextStyle(
-              color: Colors.black87,
-              fontWeight: FontWeight.w600,
-              fontSize: 18,
-            ),
-          ),
-        ],
-      ),
-      leading: IconButton(
-        icon: const Icon(Icons.menu, color: Colors.blueAccent),
-        onPressed: () {
-          // Optional: add drawer or side menu
-        },
-      ),
+      title: const Text("Expense Tracker"),
       actions: [
-        // 🔄 Mode toggle button
         IconButton(
-          icon: Icon(
-            isFamilyMode ? Icons.home : Icons.groups,
-            color: Colors.blueAccent,
-          ),
-          tooltip: isFamilyMode ? "Switch to My Home" : "Switch to Family Home",
-          onPressed: () async {
-            final familyId = await SharedPrefsHelper.getFamilyId();
-            final userId = await SharedPrefsHelper.getUserId();
-
-            setState(() {
-              isFamilyMode = !isFamilyMode;
-            });
-
-            if (isFamilyMode) {
-              // ✅ Always navigate, even if no family linked yet
-              Navigator.pushReplacement(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => FamilyDashboardScreen(
-                    familyId: familyId ?? '',
-                    userId: userId ?? '',
-                  ),
-                ),
-              );
-            } else {
-              Navigator.pushReplacement(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => const ExpenseHomePage(),
-                ),
-              );
-            }
-          },
+          icon: const Icon(Icons.family_restroom),
+          tooltip: "Family Dashboard",
+          onPressed: () => _openFamilyDashboard(context),
         ),
-
-        // 💬 Chat button
         IconButton(
-          icon: const Icon(Icons.chat_bubble_outline, color: Colors.blueAccent),
-          tooltip: "Open Finance Chat",
-          onPressed: () {
-            Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => const FinanceChatScreen()),
-            );
-          },
-        ),
-
-        // 🚪 Logout button
-        IconButton(
-          icon: const Icon(Icons.logout, color: Colors.redAccent),
+          icon: const Icon(Icons.logout),
           tooltip: "Logout",
-          onPressed: _logout,
+          onPressed: onLogout,
         ),
       ],
-      bottom: PreferredSize(
-        preferredSize: const Size.fromHeight(1),
-        child: Container(
-          color: Colors.grey.shade200,
-          height: 1,
-        ),
-      ),
     );
   }
+
+  @override
+  Size get preferredSize => const Size.fromHeight(kToolbarHeight);
 }

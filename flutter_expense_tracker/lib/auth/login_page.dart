@@ -17,7 +17,7 @@ class _LoginPageState extends State<LoginPage> {
 
   Future<void> _saveUserId(String userId) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('userId', userId);
+    await prefs.setString('user_id', userId);
   }
 
   Future<void> _login() async {

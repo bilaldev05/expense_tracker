@@ -3,7 +3,7 @@ from calendar import calendar
 import hashlib
 import string
 from unittest import result
-from fastapi import FastAPI, HTTPException, Request, UploadFile, File, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, HTTPException, Header, Request, UploadFile, File, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -18,7 +18,7 @@ import os
 import re
 from fastapi.encoders import jsonable_encoder
 import io
-
+from jose import jwt, JWTError
 import pymongo
 from PIL import Image
 import pytesseract
@@ -215,6 +215,35 @@ os.makedirs("voices", exist_ok=True)
 
 # Mount the static directory
 app.mount("/voices", StaticFiles(directory="voices"), name="voices")
+
+SECRET_KEY = "your_secret_key_here"  # Use the same key you used during login token creation
+ALGORITHM = "HS256"
+
+def get_current_user(authorization: str = Header(None)):
+    """
+    Extract and decode JWT token from Authorization header.
+    Example header: Authorization: Bearer <token>
+    """
+    if not authorization:
+        raise HTTPException(status_code=401, detail="Login first")
+
+    token = authorization.split(" ")[1] if " " in authorization else authorization
+
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        user_id = payload.get("user_id")
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Invalid token: missing user_id")
+
+        from main import users  # if users collection is defined in the same file
+        user = users.find_one({"_id": ObjectId(user_id)})
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        return user
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+
 
 # -----------------------------------------------------
 # Chat Endpoint (Main)
@@ -918,7 +947,8 @@ def join_family(data: JoinFamily):
 @app.post("/add_expense")
 def add_expense(data: AddExpense):
     """Add an expense for a user in a family"""
-    family = families.get(data.family_id)
+    family = families.find_one({"_id": ObjectId(data.family_id)})
+
     if not family:
         raise HTTPException(status_code=404, detail="Family not found")
 
@@ -956,22 +986,82 @@ def get_family_dashboard(family_id: str):
         "expenses": family["expenses"],
     }
 
+@app.post("/family/invite_code")
+def generate_invite_code(current_user: dict = Depends(get_current_user)):
+    import random, string
+    invite_code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
+    
+    # Store this code in the user's family document
+    families.update_one(
+        {"_id": ObjectId(current_user["family_id"])},
+        {"$set": {"invite_code": invite_code}}
+    )
+
+    return {"invite_code": invite_code}
+
+
+@app.post("/family/join_by_code")
+def join_family_by_code(data: dict):
+    user_id = data.get("user_id")
+    invite_code = data.get("invite_code")
+
+    family = families.find_one({"invite_code": invite_code})
+    if not family:
+        raise HTTPException(status_code=404, detail="Invalid invite code")
+
+    if user_id in family["members"]:
+        raise HTTPException(status_code=400, detail="Already in family")
+
+    families.update_one({"_id": family["_id"]}, {"$addToSet": {"members": user_id}})
+    users.update_one({"_id": user_id}, {"$set": {"family_id": family["_id"]}})
+    return {"message": "Joined family successfully", "family_id": family["_id"]}
+
+@app.post("/family/remove_member")
+def remove_member(data: dict):
+    family_id = data.get("family_id")
+    member_id = data.get("member_id")
+    families.update_one({"_id": family_id}, {"$pull": {"members": {"user_id": member_id}}})
+    return {"message": "Member removed successfully"}
+
+@app.get("/generate_invite_code")
+def generate_invite_code_endpoint(family_id: str):
+    code = generate_invite_code()
+    families.update_one({"_id": family_id}, {"$set": {"invite_code": code}})
+    return {"invite_code": code}
+@app.post("/family/remove_member")
+def remove_member(data: dict):
+    family_id = data.get("family_id")
+    member_id = data.get("member_id")
+    families.update_one({"_id": family_id}, {"$pull": {"members": {"user_id": member_id}}})
+    return {"message": "Member removed successfully"}
+
+@app.get("/generate_invite_code")
+def generate_invite_code_endpoint(family_id: str):
+    code = generate_invite_code()
+    families.update_one({"_id": family_id}, {"$set": {"invite_code": code}})
+    return {"invite_code": code}
 
 
 @app.post("/family/leave")
-def leave_family(data: dict):
-    user_id = data.get("user_id")
-    user = users.find_one({"_id": user_id})
+def leave_family(current_user: dict = Depends(get_current_user)):
+    user_id = current_user["_id"]
+    family_id = current_user.get("family_id")
+    if not family_id:
+        return JSONResponse({"error": "User not in any family"}, status_code=400)
+    
+    # Remove user from family's member list
+    families.update_one(
+        {"_id": ObjectId(family_id)},
+        {"$pull": {"members": user_id}}
+    )
 
-    if not user or not user.get("family_id"):
-        raise HTTPException(status_code=400, detail="User not in a family")
+    # Clear user's family_id
+    users.update_one(
+        {"_id": ObjectId(user_id)},
+        {"$unset": {"family_id": ""}}
+    )
 
-    family_id = user["family_id"]
-
-    families.update_one({"_id": family_id}, {"$pull": {"members": user_id}})
-    users.update_one({"_id": user_id}, {"$unset": {"family_id": "", "role_in_family": ""}})
-
-    return {"message": "Left family successfully"}
+    return {"message": "You have left the family successfully"}
 
 
 

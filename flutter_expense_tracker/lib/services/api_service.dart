@@ -298,23 +298,7 @@ AI Summary for $month:
     }
   }
 
-  // Join Family
-   Future<Map<String, dynamic>> joinFamily(String familyId, String userId) async {
-    final response = await http.post(
-      Uri.parse('$baseUrl/join_family'),
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({
-        "family_id": familyId,
-        "user_id": userId,
-      }),
-    );
-
-    if (response.statusCode == 200) {
-      return jsonDecode(response.body);
-    } else {
-      throw Exception('Failed to join family');
-    }
-  }
+  
 
   // Add Expense
    Future<Map<String, dynamic>> addfamilyExpense(String familyId, String userId, String title, double amount) async {
@@ -345,5 +329,65 @@ AI Summary for $month:
       throw Exception('Failed to fetch family dashboard');
     }
   }
+
+  // Generate Invite Code
+Future<Map<String, dynamic>> generateFamilyInvite(String familyId) async {
+  final response = await http.post(
+    Uri.parse('$baseUrl/family/invite_code'),
+    headers: {'Content-Type': 'application/json'},
+    body: jsonEncode({'family_id': familyId}),
+  );
+  if (response.statusCode == 200) return jsonDecode(response.body);
+  throw Exception('Failed to generate invite code');
+}
+
+// Remove Member
+Future<Map<String, dynamic>> removeFamilyMember(String familyId, String memberId) async {
+  final response = await http.post(
+    Uri.parse('$baseUrl/family/remove_member'),
+    headers: {'Content-Type': 'application/json'},
+    body: jsonEncode({'family_id': familyId, 'member_id': memberId}),
+  );
+  if (response.statusCode == 200) return jsonDecode(response.body);
+  throw Exception('Failed to remove member');
+}
+
+
+
+// Join Family via Invite Code
+Future<Map<String, dynamic>> joinFamily(String inviteCode, String userId) async {
+  final response = await http.post(
+    Uri.parse('$baseUrl/family/join'),
+    headers: {'Content-Type': 'application/json'},
+    body: jsonEncode({
+      'invite_code': inviteCode,
+      'user_id': userId,
+    }),
+  );
+  if (response.statusCode == 200) return jsonDecode(response.body);
+  throw Exception('Failed to join family');
+}
+Future<Map<String, dynamic>> removeMember(String familyId, String memberId) async {
+  final response = await http.post(
+    Uri.parse('$baseUrl/family/remove_member'),
+    headers: {'Content-Type': 'application/json'},
+    body: jsonEncode({
+      "family_id": familyId,
+      "member_id": memberId,
+    }),
+  );
+  if (response.statusCode == 200) return jsonDecode(response.body);
+  throw Exception("Failed to remove member");
+}
+
+Future<Map<String, dynamic>> leaveFamily(String userId) async {
+  final response = await http.post(
+    Uri.parse('$baseUrl/family/leave'),
+    headers: {'Content-Type': 'application/json'},
+    body: jsonEncode({"user_id": userId}),
+  );
+  if (response.statusCode == 200) return jsonDecode(response.body);
+  throw Exception("Failed to leave family");
+}
 
 }
